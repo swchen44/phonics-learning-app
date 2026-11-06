@@ -37,11 +37,11 @@ async function pronunciationWav(recording) {
   return wav.buffer;
 }
 
-async function assessPronunciation(word, recording, accessKey, signal) {
+async function assessPronunciation(word, recording, endpoint, accessKey, signal) {
   try {
     const audio = await pronunciationWav(recording);
     if (!audio) return { outcome: 'too-long' };
-    const url = new URL(pronunciationEndpoint, window.location.href);
+    const url = new URL(endpoint, window.location.href);
     url.searchParams.set('word', word);
     const response = await fetch(url, {
       method: 'POST',

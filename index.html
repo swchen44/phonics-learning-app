@@ -37,13 +37,19 @@
         <button data-tab="blend">拼讀</button>
         <button data-tab="record">錄音跟讀</button>
         <button data-tab="quiz">聽力測驗</button>
+        <button data-tab="typing">聽力打字</button>
         <button data-tab="reading">朗讀測驗</button>
+        <button data-tab="exam">綜合測驗</button>
       </nav>
       <details id="pronunciationSetup" hidden>
         <summary>發音判定設定</summary>
-        <p>啟用後，每題朗讀錄音會傳送至 Microsoft Azure 做發音判定。</p>
+        <p>使用已部署的評估網址及課堂使用碼（Function Key）。設定會儲存在這個瀏覽器。勾選啟用後，錄音才會送往所填網址。</p>
+        <label>評估網址 <input id="pronunciationUrl" type="url" placeholder="https://…/api/pronunciation"></label>
         <label>課堂使用碼 <input id="pronunciationAccess" type="password" autocomplete="off"></label>
+        <button id="savePronunciation" type="button" class="secondary">儲存設定</button>
+        <button id="clearPronunciation" type="button" class="secondary">清除設定</button>
         <label><input id="pronunciationConsent" type="checkbox"> 啟用發音判定</label>
+        <p id="pronunciationStatus" role="status"></p>
       </details>
       <div id="stage"></div>
       <p id="feedback" role="status" aria-live="polite"></p>
@@ -65,7 +71,7 @@
           <label class="file-label">匯入備份 <input type="file" id="import" accept=".json,application/json"></label>
         </div>
     </section>
-    <footer>學習進度儲存在這個瀏覽器。啟用發音判定時，朗讀錄音會傳送至評估服務。</footer>
+    <footer>學習進度與綜合測驗錄音儲存在這個瀏覽器。啟用發音判定時，朗讀錄音會傳送至評估服務。</footer>
   </main>
 </body>
 </html>

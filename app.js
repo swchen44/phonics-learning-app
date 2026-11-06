@@ -1,6 +1,9 @@
 'use strict';
 
 const questionsPerQuiz = 5;
+const examSize = 10;
+const quizTitles = { quiz: '聽力測驗', typing: '聽力打字', reading: '朗讀測驗' };
+const settingsKey = 'phonics-pronunciation-settings';
 const $ = id => document.getElementById(id);
 const svgNamespace = 'http://www.w3.org/2000/svg';
 let db;
@@ -9,6 +12,11 @@ let unit = units[0];
 let tab = 'sound';
 let wordIndex = 0;
 let quizzes = {};
+let exam = null;
+let examSetup = null;
+const reviewAudioUrls = new Set();
+const openExamReviews = new Set();
+let pronunciationSettings = { endpoint: pronunciationEndpoint, accessKey: '' };
 let recording = null;
 let practiceRecording = null;
 
@@ -118,9 +126,10 @@ async function progress() {
   const events = (profile?.events || []).filter(event => (event.unit ?? 1) === unit.id);
   const seen = new Set(events.filter(event => ['listen', 'record'].includes(event.kind)).map(event => event.word));
   const listening = events.filter(event => event.kind === 'quiz');
+  const typing = events.filter(event => event.kind === 'typing');
   const reading = events.filter(event => event.kind === 'reading');
   const count = unit.words.filter(word => seen.has(word.w)).length;
-  $('summary').textContent = `${profile?.name || '學生'}：練習 ${count}/${unit.words.length} 個單字 · 聽力累計答對 ${listening.filter(event => event.correct).length}/${listening.length} 題 · 朗讀累計完成 ${reading.length} 題`;
+  $('summary').textContent = `${profile?.name || '學生'}：練習 ${count}/${unit.words.length} 個單字 · 聽力累計答對 ${listening.filter(event => event.correct).length}/${listening.length} 題 · 打字累計答對 ${typing.filter(event => event.correct).length}/${typing.length} 題 · 朗讀累計完成 ${reading.length} 題`;
   $('progress').max = unit.words.length;
   $('progress').value = count;
 }
@@ -147,17 +156,40 @@ function shuffled(items) {
   return result;
 }
 
-function createQuiz() {
+function questionFor(lesson, word, kind) {
+  const options = kind === 'quiz' ? shuffled([word, ...shuffled(lesson.words.filter(option => option !== word)).slice(0, 3)]) : [];
+  return { word, options, kind, unit: lesson.id };
+}
+
+function createQuiz(questions) {
   return {
     index: 0,
     score: 0,
     selected: null,
     recordingUrl: '',
-    questions: shuffled(unit.words).slice(0, questionsPerQuiz).map(word => ({
-      word,
-      options: shuffled([word, ...shuffled(unit.words.filter(option => option !== word)).slice(0, 3)]),
-    })),
+    questions,
+    answers: [],
   };
+}
+
+function unitQuiz(kind) {
+  return createQuiz(shuffled(unit.words).slice(0, questionsPerQuiz).map(word => questionFor(unit, word, kind)));
+}
+
+function combinedQuiz(lessons, kinds) {
+  const decks = new Map(lessons.map(lesson => [lesson.id, shuffled(lesson.words)]));
+  const schedule = shuffled(lessons);
+  const rotation = shuffled(kinds);
+  return createQuiz(shuffled(Array.from({ length: examSize }, (_, index) => {
+    const lesson = schedule[index % schedule.length];
+    const deck = decks.get(lesson.id);
+    const word = deck.pop();
+    if (!deck.length) {
+      const refill = shuffled(lesson.words.filter(other => other !== word));
+      deck.push(word, ...refill);
+    }
+    return questionFor(lesson, word, rotation[index % rotation.length]);
+  })));
 }
 
 function mayNavigate() {
@@ -177,6 +209,14 @@ function resetActivities() {
   quizzes = {};
   practiceRecording = null;
   wordIndex = 0;
+}
+
+function resetStudentActivities() {
+  resetActivities();
+  exam?.assessmentRequest?.abort();
+  releaseRecording(exam?.recordingUrl);
+  exam = null;
+  examSetup = null;
 }
 
 function recordingPlayer(url) {
@@ -284,22 +324,17 @@ function drawPractice(root, word) {
 }
 
 async function checkReading(quiz, word, clip) {
-  if (!pronunciationEndpoint || !$('pronunciationConsent').checked) return;
-  const accessKey = $('pronunciationAccess').value.trim();
-  if (!accessKey) {
-    quiz.assessment = { outcome: 'access-denied' };
-    draw();
-    return;
-  }
+  const { endpoint, accessKey } = pronunciationSettings;
+  if (!endpoint || !accessKey || !$('pronunciationConsent').checked) return;
   const request = new AbortController();
   quiz.assessmentRequest = request;
   quiz.assessment = { outcome: 'pending' };
   draw();
-  const result = await assessPronunciation(word.w, clip, accessKey, request.signal);
+  const result = await assessPronunciation(word.w, clip, endpoint, accessKey, request.signal);
   if (request.signal.aborted) return;
   quiz.assessmentRequest = null;
   quiz.assessment = result;
-  if (tab === 'reading' && quizzes.reading === quiz) draw();
+  if ((tab === 'reading' && quizzes.reading === quiz) || (tab === 'exam' && exam === quiz)) draw();
 }
 
 function readingFeedback(assessment) {
@@ -320,35 +355,46 @@ function readingFeedback(assessment) {
   message(hints[outcome], outcome === 'clear' || outcome === 'pending');
 }
 
-function drawQuiz(root) {
-  const mode = tab;
-  const listening = mode === 'quiz';
-  const quiz = quizzes[mode] ??= createQuiz();
+function drawQuiz(root, quiz = quizzes[tab] ??= unitQuiz(tab), combined = false) {
   const total = quiz.questions.length;
-  root.append(element('h3', listening ? '聽力測驗' : '朗讀測驗'));
   if (quiz.index === total) {
-    root.append(element('p', listening ? `答對 ${quiz.score} / ${total} 題` : `已完成 ${total} / ${total} 題朗讀`),
-      actions(button('再做一次', () => { quizzes[mode] = createQuiz(); draw(); })));
+    if (combined) {
+      drawExamResult(root, quiz);
+    } else {
+      root.append(element('h3', quizTitles[tab]), element('p', tab === 'reading' ? `已完成 ${total} / ${total} 題朗讀` : `答對 ${quiz.score} / ${total} 題`),
+        actions(button('再做一次', () => { quizzes[tab] = unitQuiz(tab); draw(); })));
+    }
     return;
   }
 
-  const { word, options } = quiz.questions[quiz.index];
-  root.append(element('p', `第 ${quiz.index + 1} / ${total} 題`, 'question-counter'));
+  const { word, options, kind: mode, unit: questionUnit } = quiz.questions[quiz.index];
+  const listening = mode === 'quiz';
+  const reading = mode === 'reading';
+  root.append(element('h3', quizTitles[mode]), element('p', `第 ${quiz.index + 1} / ${total} 題${combined ? ` · Unit ${questionUnit}` : ''}`, 'question-counter'));
   const next = button(quiz.index + 1 === total ? '看結果 →' : '下一題 →', () => {
-    if (!mayNavigate()) return;
-    if (!listening) {
-      const outcome = quiz.assessment?.outcome;
-      const correct = outcome === 'clear' ? true : outcome === 'retry' ? false : undefined;
-      log('reading', word, correct);
+    if (next.disabled || !mayNavigate() || quiz.questions[quiz.index]?.word !== word) return;
+    next.disabled = true;
+    const outcome = quiz.assessment?.outcome;
+    const answer = listening ? quiz.selected?.w : quiz.selected;
+    const correct = reading ? (outcome === 'clear' ? true : outcome === 'retry' ? false : null) : answer.toLowerCase() === word.w;
+    if (combined) {
+      quiz.answers.push({ unit: questionUnit, kind: mode, word: word.w, answer, correct,
+        source: reading && correct !== null ? 'server' : null, sounds: quiz.assessment?.sounds ?? [] });
+      if (reading) quiz.clips.set(quiz.index, quiz.currentClip);
+    }
+    if (reading) {
+      if (!combined) log('reading', word, correct ?? undefined);
       releaseRecording(quiz.recordingUrl);
       quiz.recordingUrl = '';
       quiz.assessment = null;
+      quiz.currentClip = null;
     }
     quiz.index++;
     quiz.selected = null;
+    if (combined && quiz.index === total) saveExam(quiz);
     draw();
   });
-  next.disabled = listening ? !quiz.selected : !quiz.recordingUrl || Boolean(quiz.assessmentRequest);
+  next.disabled = reading ? !quiz.recordingUrl || Boolean(quiz.assessmentRequest) : !quiz.selected;
 
   if (listening) {
     root.append(element('p', '先聽發音，再選出聽到的單字。'), pronunciationButtons(word));
@@ -359,7 +405,7 @@ function drawQuiz(root) {
         quiz.selected = option;
         const correct = option === word;
         if (correct) quiz.score++;
-        log('quiz', word, correct);
+        if (!combined) log('quiz', word, correct);
         draw();
         $('stage').querySelector('.quiz-next').focus();
       }, true);
@@ -371,12 +417,50 @@ function drawQuiz(root) {
     }
     root.append(grid);
     if (quiz.selected) message(quiz.selected === word ? '答對了！' : `正確答案是 ${word.w}。可以再聽一次。`, quiz.selected === word);
+  } else if (mode === 'typing') {
+    root.append(element('p', '聽慢速發音，輸入完整單字。'), element('p', word.w[0].toUpperCase(), 'word'),
+      actions(button('🔊 慢速播放', () => speak(word.w, 0.6), true)));
+    const input = element('input');
+    input.id = 'typingAnswer';
+    input.lang = 'en';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.setAttribute('autocorrect', 'off');
+    input.setAttribute('autocapitalize', 'off');
+    input.maxLength = 64;
+    input.required = true;
+    input.value = quiz.selected ?? '';
+    input.disabled = Boolean(quiz.selected);
+    const label = element('label', '完整單字');
+    label.htmlFor = input.id;
+    const submit = button('送出', null);
+    submit.type = 'submit';
+    submit.disabled = input.disabled;
+    const form = element('form');
+    form.append(actions(label, input, submit));
+    form.onsubmit = event => {
+      event.preventDefault();
+      const answer = input.value.trim();
+      if (quiz.selected || !answer) return;
+      quiz.selected = answer;
+      const correct = answer.toLowerCase() === word.w;
+      if (correct) quiz.score++;
+      if (!combined) log('typing', word, correct);
+      draw();
+      $('stage').querySelector('.quiz-next').focus();
+    };
+    root.append(form);
+    if (quiz.selected) {
+      const correct = quiz.selected.toLowerCase() === word.w;
+      message(correct ? '答對了！' : `正確拼法是 ${word.w}。`, correct);
+    }
   } else {
     root.append(element('p', '看單字，大聲念出來並錄音。'), wordLabel(word, true));
     if (!quiz.assessmentRequest) {
       root.append(recordingControls((url, clip) => {
         releaseRecording(quiz.recordingUrl);
         quiz.recordingUrl = url;
+        if (combined) quiz.currentClip = clip;
         quiz.assessment = null;
         draw();
         checkReading(quiz, word, clip);
@@ -388,21 +472,267 @@ function drawQuiz(root) {
       root.append(review);
       readingFeedback(quiz.assessment);
     }
-    root.append(element('p', pronunciationEndpoint ? '啟用發音判定後，可查看每題的判定與練習提示。' : '目前可錄音並比對示範音，發音判定服務尚未連線。', 'muted'));
+    root.append(element('p', combined ? '沒有啟用發音判定時，可在交卷後回放並人工評分。' : '未啟用發音判定時，這題只錄音，不計分。', 'muted'));
   }
   next.classList.add('quiz-next');
   root.append(actions(next));
 }
 
+function examScore(answers) {
+  const graded = answers.filter(answer => answer.correct !== null);
+  const ungraded = answers.length - graded.length;
+  const correct = graded.filter(answer => answer.correct).length;
+  const score = graded.length ? `答對 ${correct} / ${graded.length} 題（${Math.round(correct / graded.length * 100)} 分）` : '已完成錄音，這輪無可計分題目';
+  return ungraded ? `${score} · ${ungraded} 題未評分` : score;
+}
+
+function examRecording(owner, examId, question) {
+  const key = [owner, examId, question];
+  const row = actions();
+  let audioUrl;
+  const play = button('播放錄音', async () => {
+    play.disabled = true;
+    try {
+      const entry = await req(db.transaction('examAudio').objectStore('examAudio').get(key));
+      if (!row.isConnected) return;
+      if (!entry) {
+        row.replaceChildren(element('span', '沒有本機錄音。', 'muted'));
+        return;
+      }
+      audioUrl = URL.createObjectURL(entry.clip);
+      reviewAudioUrls.add(audioUrl);
+      const player = recordingPlayer(audioUrl);
+      play.replaceWith(player);
+      player.play().catch(() => {});
+    } catch {
+      if (row.isConnected) message('無法讀取錄音。', false);
+      play.disabled = false;
+    }
+  }, true);
+  const remove = button('刪除錄音', async () => {
+    if (!confirm('刪除這一題的錄音？題目與分數仍會保留。')) return;
+    remove.disabled = true;
+    try {
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction('examAudio', 'readwrite');
+        transaction.oncomplete = resolve;
+        transaction.onabort = reject;
+        transaction.objectStore('examAudio').delete(key);
+      });
+      releaseRecording(audioUrl);
+      reviewAudioUrls.delete(audioUrl);
+      if (row.isConnected) row.replaceChildren(element('span', '錄音已刪除。', 'muted'));
+    } catch {
+      if (row.isConnected) message('無法刪除錄音。', false);
+      remove.disabled = false;
+    }
+  }, true);
+  row.append(play, remove);
+  const request = db.transaction('examAudio').objectStore('examAudio').getKey(key);
+  request.onsuccess = () => {
+    if (row.isConnected && request.result === undefined && !audioUrl && !play.disabled && !remove.disabled) {
+      row.replaceChildren(element('span', '沒有本機錄音。', 'muted'));
+    }
+  };
+  return row;
+}
+
+function manualGrade(owner, result, index, answer) {
+  const control = element('select');
+  control.setAttribute('aria-label', `第 ${index + 1} 題人工評分`);
+  control.append(new Option('待人工評分', ''), new Option('念對', 'true'), new Option('需再練習', 'false'));
+  control.value = answer.correct === null ? '' : String(answer.correct);
+  control.onchange = async () => {
+    const correct = control.value === '' ? null : control.value === 'true';
+    control.disabled = true;
+    try {
+      await new Promise((resolve, reject) => {
+        const target = store('readwrite');
+        const request = target.get(owner);
+        request.onsuccess = () => {
+          const profile = request.result;
+          const stored = profile?.exams?.find(item => item.id === result.id);
+          const question = stored?.answers[index];
+          if (!question || question.kind !== 'reading' || question.source === 'server') {
+            target.transaction.abort();
+            return;
+          }
+          question.correct = correct;
+          question.source = correct === null ? null : 'manual';
+          target.put(profile);
+        };
+        target.transaction.oncomplete = resolve;
+        target.transaction.onabort = reject;
+      });
+      answer.correct = correct;
+      answer.source = correct === null ? null : 'manual';
+      if (tab === 'exam' && student === owner) draw();
+    } catch {
+      if (control.isConnected) {
+        control.value = answer.correct === null ? '' : String(answer.correct);
+        control.disabled = false;
+        message('無法儲存人工評分。', false);
+      }
+    }
+  };
+  return control;
+}
+
+function examReview(result, owner, audioAvailable = true) {
+  const list = element('ol', '', 'exam-errors');
+  for (const [index, answer] of result.answers.entries()) {
+    const prefix = `Unit ${answer.unit} · ${quizTitles[answer.kind]}`;
+    const source = answer.source === 'server' ? '（伺服器）' : answer.source === 'manual' ? '（人工）' : '';
+    const grade = answer.correct === null ? '未評分' : `${answer.correct ? '答對' : '需再練習'}${source}`;
+    const item = element('li', '', answer.correct === false ? 'exam-mistake' : '');
+    item.append(element('p', `${prefix} · ${answer.word} · ${grade}`));
+    if (answer.kind === 'reading') {
+      if (answer.sounds.length) item.append(element('p', `留意 ${answer.sounds.map(sound => `/${sound}/`).join('、')}`));
+      if (audioAvailable) {
+        item.append(examRecording(owner, result.id, index));
+        if (answer.source !== 'server') item.append(manualGrade(owner, result, index, answer));
+      }
+    } else if (answer.correct === false) {
+      item.append(element('p', `你的答案是「${answer.answer}」。`));
+    }
+    list.append(item);
+  }
+  return list;
+}
+
+async function saveExam(quiz) {
+  if (quiz.saving || quiz.saved) return;
+  quiz.saving = true;
+  quiz.result ??= { id: crypto.randomUUID(), at: new Date().toISOString(), answers: quiz.answers };
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(['students', 'examAudio'], 'readwrite');
+      const target = transaction.objectStore('students');
+      const request = target.get(quiz.student);
+      request.onsuccess = () => {
+        const profile = request.result;
+        if (!profile) {
+          target.transaction.abort();
+          return;
+        }
+        const exams = profile.exams ?? [];
+        if (exams.some(item => item.id === quiz.result.id)) return;
+        target.put({ ...profile, exams: [...exams, quiz.result] });
+        const recordings = transaction.objectStore('examAudio');
+        for (const [question, clip] of quiz.clips) {
+          recordings.put({ student: quiz.student, exam: quiz.result.id, question, clip });
+        }
+      };
+      target.transaction.oncomplete = resolve;
+      target.transaction.onabort = reject;
+    });
+    quiz.saved = true;
+    quiz.clips.clear();
+  } catch {
+    quiz.saved = false;
+  } finally {
+    quiz.saving = false;
+    if (tab === 'exam' && exam === quiz) draw();
+  }
+}
+
+function drawExamResult(root, quiz) {
+  root.append(element('h3', '綜合測驗結果'), element('p', examScore(quiz.answers)), examReview(quiz.result, quiz.student, quiz.saved));
+  if (quiz.saved) {
+    root.append(element('p', '已儲存到目前學生的測驗紀錄。', 'muted'), actions(button('回到出題設定', () => { exam = null; draw(); })));
+  } else if (quiz.saving) {
+    root.append(element('p', '正在儲存測驗結果…', 'muted'));
+  } else {
+    root.append(element('p', '儲存失敗，請再試一次。'), actions(button('重試儲存', () => { saveExam(quiz); draw(); })));
+  }
+}
+
+async function showExamHistory(root, activeStudent) {
+  try {
+    const profile = await req(store().get(activeStudent));
+    if (!root.isConnected || activeStudent !== student) return;
+    const exams = profile?.exams ?? [];
+    if (!exams.length) root.append(element('p', '目前還沒有完成的綜合測驗。', 'muted'));
+    for (const result of [...exams].reverse()) {
+      const detail = element('details', '', 'exam-history');
+      detail.open = openExamReviews.has(result.id);
+      detail.ontoggle = () => {
+        if (detail.open) openExamReviews.add(result.id);
+        else openExamReviews.delete(result.id);
+      };
+      detail.append(element('summary', `${new Date(result.at).toLocaleString('zh-TW')} · ${examScore(result.answers)}`), examReview(result, activeStudent));
+      root.append(detail);
+    }
+  } catch {
+    if (root.isConnected) root.append(element('p', '無法讀取測驗紀錄。'));
+  }
+}
+
+function examCheckbox(text, selected, value) {
+  const label = element('label');
+  const control = element('input');
+  control.type = 'checkbox';
+  control.checked = selected.has(value);
+  control.onchange = () => {
+    if (control.checked) selected.add(value);
+    else selected.delete(value);
+  };
+  label.append(control, ` ${text}`);
+  return label;
+}
+
+function drawExam(root) {
+  if (exam) {
+    drawQuiz(root, exam, true);
+    return;
+  }
+  const setup = examSetup ??= { volume: Math.floor((unit.id - 1) / 8), units: new Set([unit.id]), kinds: new Set(Object.keys(quizTitles)) };
+  const lessons = units.slice(setup.volume * 8, (setup.volume + 1) * 8);
+  const book = element('select');
+  book.id = 'examVolume';
+  volumes.forEach((name, index) => book.append(new Option(`第 ${index + 1} 冊 · ${name}`, index)));
+  book.value = String(setup.volume);
+  book.onchange = () => {
+    setup.volume = Number(book.value);
+    setup.units.clear();
+    draw();
+    $('examVolume').focus();
+  };
+  const bookLabel = element('label', '選擇冊別');
+  bookLabel.htmlFor = book.id;
+  const range = element('fieldset');
+  range.append(element('legend', '單元範圍（可多選）'), actions(...lessons.map(lesson => examCheckbox(`Unit ${lesson.id} · ${lesson.title}`, setup.units, lesson.id))));
+  const types = element('fieldset');
+  types.append(element('legend', '題型（可多選）'), actions(...Object.entries(quizTitles).map(([kind, title]) => examCheckbox(title, setup.kinds, kind))));
+  const start = button('開始 10 題綜合測驗', () => {
+    const selected = lessons.filter(lesson => setup.units.has(lesson.id));
+    if (!selected.length || !setup.kinds.size) {
+      message('請至少勾選一個單元和一種題型。', false);
+      return;
+    }
+    exam = combinedQuiz(selected, [...setup.kinds]);
+    exam.student = student;
+    exam.clips = new Map();
+    draw();
+  });
+  const history = element('section', '', 'exam-history');
+  history.append(element('h4', '這位學生的測驗紀錄'));
+  root.append(element('h3', '綜合測驗'), actions(bookLabel, book), range, types, actions(start), history);
+  showExamHistory(history, student);
+}
+
 function draw() {
   window.speechSynthesis?.cancel();
-  $('pronunciationSetup').hidden = tab !== 'reading' || !pronunciationEndpoint;
+  for (const url of reviewAudioUrls) releaseRecording(url);
+  reviewAudioUrls.clear();
+  $('pronunciationSetup').hidden = tab !== 'reading' && !(tab === 'exam' && exam?.questions[exam.index]?.kind === 'reading');
   document.querySelectorAll('[data-tab]').forEach(node => node.setAttribute('aria-pressed', node.dataset.tab === tab));
   const root = $('stage');
   root.replaceChildren();
   message('');
   if (tab === 'sound') drawSound(root);
   else if (tab === 'blend' || tab === 'record') drawPractice(root, unit.words[wordIndex]);
+  else if (tab === 'exam') drawExam(root);
   else drawQuiz(root);
 }
 
@@ -423,6 +753,19 @@ async function backup() {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function restoredExams(exams) {
+  if (!Array.isArray(exams)) return [];
+  return exams.filter(result => result && typeof result.id === 'string' && typeof result.at === 'string' &&
+    !Number.isNaN(Date.parse(result.at)) && Array.isArray(result.answers) && result.answers.length === examSize &&
+    result.answers.every(answer => answer && Number.isInteger(answer.unit) && Object.hasOwn(quizTitles, answer.kind) &&
+      typeof answer.word === 'string' && (answer.kind === 'reading' || typeof answer.answer === 'string') &&
+      [true, false, null].includes(answer.correct) && Array.isArray(answer.sounds) && answer.sounds.every(sound => typeof sound === 'string')))
+    .map(({ id, at, answers }) => ({ id, at, answers: answers.map(({ unit, kind, word, answer, correct, sounds, source }) => ({
+      unit, kind, word, answer: kind === 'reading' ? null : answer, correct, sounds,
+      source: kind === 'reading' && correct !== null && ['manual', 'server'].includes(source) ? source : null,
+    })) }));
+}
+
 async function restore(file) {
   try {
     if (file.size > 5000000) throw Error('檔案太大');
@@ -433,11 +776,16 @@ async function restore(file) {
         throw Error('學生資料格式錯誤');
       }
       const events = profile.events.filter(event => event && typeof event.kind === 'string' && typeof event.word === 'string').slice(-3000);
-      return { id: profile.id, name: profile.name.slice(0, 30), events };
+      return { id: profile.id, name: profile.name.slice(0, 30), events, exams: restoredExams(profile.exams) };
     });
     if (!mayNavigate() || !confirm('匯入會覆蓋相同學生 ID 的進度，確定嗎？')) return;
     const target = store('readwrite');
-    await Promise.all(profiles.map(profile => req(target.put(profile))));
+    await Promise.all(profiles.map(async profile => {
+      const previous = await req(target.get(profile.id));
+      const exams = new Map(profile.exams.map(result => [result.id, result]));
+      for (const result of previous?.exams ?? []) exams.set(result.id, result);
+      await req(target.put({ ...profile, exams: [...exams.values()].sort((a, b) => a.at.localeCompare(b.at)) }));
+    }));
     await students();
     message('備份匯入完成。');
   } catch (error) {
@@ -445,12 +793,70 @@ async function restore(file) {
   }
 }
 
+function initPronunciationSettings() {
+  const endpointInput = $('pronunciationUrl');
+  const keyInput = $('pronunciationAccess');
+  const consent = $('pronunciationConsent');
+  const status = $('pronunciationStatus');
+  function setFields() {
+    endpointInput.value = pronunciationSettings.endpoint;
+    keyInput.value = pronunciationSettings.accessKey;
+    consent.disabled = !pronunciationSettings.accessKey || !pronunciationSettings.endpoint;
+  }
+  try {
+    const saved = JSON.parse(localStorage.getItem(settingsKey));
+    if (saved && typeof saved.endpoint === 'string' && typeof saved.accessKey === 'string') pronunciationSettings = saved;
+  } catch {
+    status.textContent = '無法讀取本機評估設定。';
+  }
+  setFields();
+  $('savePronunciation').onclick = () => {
+    const accessKey = keyInput.value.trim();
+    const endpoint = endpointInput.value.trim();
+    try {
+      if (endpoint !== pronunciationEndpoint || !pronunciationEndpoint) {
+        const url = new URL(endpoint);
+        if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw Error();
+      }
+      if (!accessKey) throw Error();
+    } catch {
+      status.textContent = '請輸入有效的 HTTPS 評估網址與課堂使用碼。網址請勿包含金鑰或查詢參數。';
+      return;
+    }
+    try {
+      localStorage.setItem(settingsKey, JSON.stringify({ endpoint, accessKey }));
+      pronunciationSettings = { endpoint, accessKey };
+      consent.checked = false;
+      setFields();
+      status.textContent = '已儲存。勾選「啟用發音判定」後開始使用。';
+    } catch {
+      status.textContent = '瀏覽器無法儲存評估設定。';
+    }
+  };
+  $('clearPronunciation').onclick = () => {
+    try {
+      localStorage.removeItem(settingsKey);
+      pronunciationSettings = { endpoint: pronunciationEndpoint, accessKey: '' };
+      consent.checked = false;
+      setFields();
+      status.textContent = '已清除設定，目前只錄音。';
+    } catch {
+      status.textContent = '瀏覽器無法清除評估設定。';
+    }
+  };
+}
+
 async function init() {
-  const request = indexedDB.open('phonics-progress', 1);
-  request.onupgradeneeded = () => request.result.createObjectStore('students', { keyPath: 'id' });
+  const request = indexedDB.open('phonics-progress', 2);
+  request.onupgradeneeded = event => {
+    if (event.oldVersion < 1) request.result.createObjectStore('students', { keyPath: 'id' });
+    if (event.oldVersion < 2) request.result.createObjectStore('examAudio', { keyPath: ['student', 'exam', 'question'] });
+  };
+  request.onblocked = () => message('請關閉這個 App 的其他分頁，再重新整理。', false);
   db = await req(request);
   db.onversionchange = () => db.close();
   await students();
+  initPronunciationSettings();
 
   $('student').onchange = event => {
     if (!mayNavigate()) {
@@ -458,7 +864,7 @@ async function init() {
       return;
     }
     student = event.target.value;
-    resetActivities();
+    resetStudentActivities();
     draw();
     progress().catch(reportStorageError);
   };
@@ -474,7 +880,7 @@ async function init() {
       }
       student = profile.id;
       $('newStudent').value = '';
-      resetActivities();
+      resetStudentActivities();
       draw();
       await students();
     } catch {
