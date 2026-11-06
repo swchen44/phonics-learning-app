@@ -51,6 +51,25 @@
       <label class="file-label">匯入備份 <input type="file" id="import" accept=".json,application/json"></label>
       <p>備份包含學生進度與試卷，錄音留在原瀏覽器。</p>
     </section>
+    <section class="data-management" aria-labelledby="dataManagementTitle">
+      <h3 id="dataManagementTitle">儲存空間與資料清除</h3>
+      <p>每位學生的資料內容與錄音大小估算，不含瀏覽器索引及共用快取。</p>
+      <button id="refreshUsage" type="button" class="secondary">更新空間使用量</button>
+      <div id="storageUsage" aria-live="polite"></div>
+      <div class="actions">
+        <label>使用者 <select id="clearStudent"></select></label>
+        <label>時間 <select id="clearAge">
+          <option value="all">全清</option>
+          <option value="1">1 天前</option>
+          <option value="3">3 天前</option>
+          <option value="7">7 天前</option>
+          <option value="30">30 天前</option>
+        </select></label>
+        <button id="clearData" type="button" class="secondary">清除資料</button>
+      </div>
+      <p>清除所選學生的錄音、測驗、錯字和練習紀錄；學生名稱會保留。選「3 天前」會保留最近 3 天的資料。</p>
+      <p id="dataManagementStatus" role="status" aria-live="polite"></p>
+    </section>
     <p id="settingsFeedback" role="status" aria-live="polite"></p>
   </dialog>
   <dialog id="studentsDialog" aria-labelledby="studentsTitle">

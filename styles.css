@@ -106,6 +106,10 @@ progress { width: 100%; accent-color: var(--good); }
 #settingsDialog::backdrop, #studentsDialog::backdrop { background: #27241f88; }
 .dialog-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
 .backup { display: grid; justify-items: start; gap: .5rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+.data-management { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.data-management p, .data-management .actions { margin-top: .5rem; }
+.data-management label { display: grid; gap: .2rem; }
+#storageUsage ul { padding-left: 1.4rem; }
 #settingsFeedback.bad { color: #9d382e; }
 #settingsFeedback.ok { color: var(--good); }
 #studentsFeedback.bad { color: #9d382e; }

@@ -829,19 +829,22 @@ function drawExam(root) {
   showExamHistory(history, student);
 }
 
-async function scanMistakes(root, activeStudent) {
+async function scanMistakes(root, activeStudent, period) {
   try {
+    const now = Date.now();
+    const cutoff = period === 'all' ? null : period === 'today' ? new Date(new Date(now).setHours(0, 0, 0, 0)).getTime() : now - Number(period) * 86400000;
     const profile = await req(store().get(activeStudent));
-    if (!root.isConnected || student !== activeStudent || tab !== 'mistakes') return;
+    if (!root.isConnected || student !== activeStudent || tab !== 'mistakes' || $('mistakePeriod')?.value !== period) return;
     const counts = { listening: new Map(), reading: new Map() };
-    function count(kind, word, correct) {
+    function count(kind, word, correct, at) {
       if (correct !== false || typeof word !== 'string') return;
+      if (cutoff !== null && !(Date.parse(at) >= cutoff && Date.parse(at) <= now)) return;
       const category = kind === 'reading' ? counts.reading : ['quiz', 'typing'].includes(kind) ? counts.listening : null;
       if (category) category.set(word, (category.get(word) ?? 0) + 1);
     }
-    for (const event of profile?.events ?? []) count(event.kind, event.word, event.correct);
+    for (const event of profile?.events ?? []) count(event.kind, event.word, event.correct, event.at);
     for (const result of profile?.exams ?? []) {
-      for (const answer of result.answers ?? []) count(answer.kind, answer.word, answer.correct);
+      for (const answer of result.answers ?? []) count(answer.kind, answer.word, answer.correct, result.at);
     }
     root.replaceChildren();
     for (const [category, title] of [['listening', '聽力'], ['reading', '朗讀']]) {
@@ -863,8 +866,144 @@ async function scanMistakes(root, activeStudent) {
 
 function drawMistakes(root) {
   const results = element('div', '', 'mistake-results');
+  const period = element('select');
+  period.id = 'mistakePeriod';
+  for (const [value, title] of [['today', '今天'], ['3', '最近 3 天'], ['7', '最近 7 天'], ['30', '最近 30 天'], ['all', '全部']]) {
+    period.append(new Option(title, value));
+  }
+  period.value = 'all';
+  const label = element('label', '統計期間 ');
+  label.append(period);
   root.append(element('h3', '常錯字'), element('p', '掃描目前學生的單元練習與綜合測驗紀錄。'),
-    actions(button('掃描常錯字', () => scanMistakes(results, student))), results);
+    actions(label, button('掃描常錯字', () => scanMistakes(results, student, period.value))), results);
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function storedStudentData() {
+  const transaction = db.transaction(['students', 'examAudio']);
+  const [profiles, recordings] = await Promise.all([
+    req(transaction.objectStore('students').getAll()),
+    req(transaction.objectStore('examAudio').getAll()),
+  ]);
+  return { profiles, recordings };
+}
+
+async function refreshUsage() {
+  const status = $('dataManagementStatus');
+  try {
+    const { profiles, recordings } = await storedStudentData();
+    const bytes = new Map(profiles.map(profile => [profile.id, new TextEncoder().encode(JSON.stringify(profile)).byteLength]));
+    for (const recording of recordings) {
+      if (bytes.has(recording.student)) bytes.set(recording.student, bytes.get(recording.student) + (recording.clip?.size ?? 0));
+    }
+    const list = element('ul');
+    for (const profile of profiles) list.append(element('li', `${profile.name} · 約 ${formatBytes(bytes.get(profile.id))}`));
+    $('storageUsage').replaceChildren(list);
+    const picker = $('clearStudent');
+    const selected = picker.value;
+    picker.replaceChildren(new Option('全部使用者', '__all__'), ...profiles.map(profile => new Option(profile.name, profile.id)));
+    picker.value = [...picker.options].some(option => option.value === selected) ? selected : student;
+    status.textContent = '';
+  } catch {
+    status.textContent = '無法讀取空間使用量，請再試一次。';
+  }
+}
+
+function oldEnough(at, cutoff) {
+  if (cutoff === null) return true;
+  const timestamp = Date.parse(at);
+  return Number.isFinite(timestamp) && timestamp < cutoff;
+}
+
+function deletionPlan(profiles, recordings, selected, cutoff) {
+  const targets = profiles.filter(profile => selected === '__all__' || profile.id === selected);
+  const ids = new Set(targets.map(profile => profile.id));
+  const exams = new Map(targets.map(profile => [profile.id, new Set((profile.exams ?? []).filter(result => oldEnough(result.at, cutoff)).map(result => result.id))]));
+  const eventCounts = new Map();
+  let events = 0;
+  for (const profile of targets) {
+    const entries = new Map();
+    for (const event of profile.events ?? []) {
+      if (!oldEnough(event.at, cutoff)) continue;
+      const key = JSON.stringify(event);
+      entries.set(key, (entries.get(key) ?? 0) + 1);
+      events++;
+    }
+    eventCounts.set(profile.id, entries);
+  }
+  const examCount = [...exams.values()].reduce((total, items) => total + items.size, 0);
+  const audioKeys = new Set(recordings.filter(clip => ids.has(clip.student) && (cutoff === null || exams.get(clip.student).has(clip.exam)))
+    .map(clip => JSON.stringify([clip.student, clip.exam, clip.question])));
+  return { ids, exams, eventCounts, audioKeys, events, examCount, audioCount: audioKeys.size };
+}
+
+async function clearStudentData() {
+  const status = $('dataManagementStatus');
+  const button = $('clearData');
+  const selected = $('clearStudent').value;
+  const age = $('clearAge').value;
+  if (!selected || !['all', '1', '3', '7', '30'].includes(age)) return;
+  if (recording || exam?.saving || exam?.assessmentRequest) {
+    status.textContent = '請先完成錄音、發音判定或測驗儲存。';
+    return;
+  }
+  button.disabled = true;
+  try {
+    const cutoff = age === 'all' ? null : Date.now() - Number(age) * 86400000;
+    const { profiles, recordings } = await storedStudentData();
+    const plan = deletionPlan(profiles, recordings, selected, cutoff);
+    if (!plan.ids.size) throw Error('找不到所選使用者。');
+    const label = selected === '__all__' ? '全部使用者' : profiles.find(profile => profile.id === selected).name;
+    const time = cutoff === null ? '全部時間' : `早於 ${new Date(cutoff).toLocaleString('zh-TW')} 的資料`;
+    const reset = plan.ids.has(student) ? '\n目前學生正在進行的練習和未交卷測驗也會重置。' : '';
+    if (!confirm(`確定清除 ${label}，${time}？\n預計刪除 ${plan.events} 筆單元練習及測驗紀錄、${plan.examCount} 份綜合測驗與 ${plan.audioCount} 段錄音。學生名稱保留。${reset}`)) return;
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(['students', 'examAudio'], 'readwrite');
+      const users = transaction.objectStore('students');
+      const audio = transaction.objectStore('examAudio');
+      const request = users.getAll();
+      request.onsuccess = () => {
+        for (const profile of request.result) {
+          if (!plan.ids.has(profile.id)) continue;
+          const remaining = new Map(plan.eventCounts.get(profile.id));
+          profile.events = (profile.events ?? []).filter(event => {
+            const key = JSON.stringify(event);
+            const count = remaining.get(key) ?? 0;
+            if (!count) return true;
+            remaining.set(key, count - 1);
+            return false;
+          });
+          profile.exams = (profile.exams ?? []).filter(result => !plan.exams.get(profile.id).has(result.id));
+          users.put(profile);
+        }
+        const cursor = audio.openCursor();
+        cursor.onsuccess = () => {
+          const entry = cursor.result;
+          if (!entry) return;
+          if (plan.audioKeys.has(JSON.stringify(entry.primaryKey))) entry.delete();
+          entry.continue();
+        };
+      };
+      transaction.oncomplete = resolve;
+      transaction.onabort = () => reject(transaction.error || Error('資料清除失敗。'));
+    });
+    if (plan.ids.has(student)) {
+      resetStudentActivities();
+      draw();
+      await progress();
+    }
+    await refreshUsage();
+    status.textContent = '清除完成，學生名稱已保留。';
+  } catch (error) {
+    status.textContent = error.message || '資料清除失敗，請再試一次。';
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function draw() {
@@ -1067,7 +1206,10 @@ async function init() {
     if ($('menuToggle').getAttribute('aria-expanded') === 'true') $('menuToggle').click();
     $('settingsFeedback').textContent = '';
     $('settingsDialog').showModal();
+    refreshUsage();
   };
+  $('refreshUsage').onclick = refreshUsage;
+  $('clearData').onclick = clearStudentData;
   $('closeSettings').onclick = () => $('settingsDialog').close();
   $('settingsDialog').onclose = () => $('menuToggle').focus();
   $('studentsToggle').onclick = () => {

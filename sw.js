@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'phonics-mvp-';
-const CACHE = `${CACHE_PREFIX}v12`;
+const CACHE = `${CACHE_PREFIX}v13`;
 const ASSETS = [
   './', './index.html', './app.js', './curriculum.js', './pronunciation.js',
   './styles.css', './pictures.svg', './manifest.webmanifest',
