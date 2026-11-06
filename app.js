@@ -1014,6 +1014,12 @@ async function init() {
     $('sideMenu').inert = expanded;
     $('sideMenu').classList.toggle('open', !expanded);
   };
+  document.addEventListener('click', event => {
+    if ($('menuToggle').getAttribute('aria-expanded') === 'true' &&
+        !$('menuToggle').contains(event.target) && !$('sideMenu').contains(event.target)) {
+      $('menuToggle').click();
+    }
+  });
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && $('menuToggle').getAttribute('aria-expanded') === 'true' && !$('settingsDialog').open && !$('hintDialog').open) {
       $('menuToggle').click();
