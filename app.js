@@ -9,7 +9,6 @@ let hintSettings = Object.fromEntries(Object.keys(hintTitles).map(kind => [kind,
 const settingsKey = 'phonics-pronunciation-settings';
 const slowDurationKey = 'phonics-slow-duration';
 const normalRate = 0.9;
-const originalSlowRate = 0.6;
 let slowDuration = 2;
 const $ = id => document.getElementById(id);
 const svgNamespace = 'http://www.w3.org/2000/svg';
@@ -110,7 +109,7 @@ function pronunciationButtons(word, onPlay) {
   }
   return actions(
     button('🔊 正常速度', () => play(normalRate)),
-    button('🔊 慢速播放', () => play(originalSlowRate / slowDuration), true),
+    button('🔊 慢速播放', () => play(normalRate / slowDuration), true),
   );
 }
 
@@ -541,7 +540,7 @@ function drawQuiz(root, quiz = quizzes[tab] ??= unitQuiz(tab), combined = false)
     if (quiz.selected) message(quiz.selected === word ? '答對了！' : `正確答案是 ${word.w}。可以再聽一次。`, quiz.selected === word);
   } else if (mode === 'typing') {
     root.append(element('p', '聽慢速發音，輸入完整單字。'),
-      actions(button('🔊 慢速播放', () => speak(word.w, originalSlowRate / slowDuration), true)));
+      actions(button('🔊 慢速播放', () => speak(word.w, normalRate / slowDuration), true)));
     const input = element('input');
     input.id = 'typingAnswer';
     input.lang = 'en';
