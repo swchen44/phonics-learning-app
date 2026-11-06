@@ -37,6 +37,10 @@ function store(mode = 'readonly') {
 function message(text, good = true) {
   $('feedback').textContent = text;
   $('feedback').className = good ? 'ok' : 'bad';
+  if ($('settingsDialog').open) {
+    $('settingsFeedback').textContent = text;
+    $('settingsFeedback').className = good ? 'ok' : 'bad';
+  }
 }
 
 function element(tag, text = '', className = '') {
@@ -180,17 +184,12 @@ function unitQuiz(kind) {
 }
 
 function combinedQuiz(lessons, kinds) {
-  const decks = new Map(lessons.map(lesson => [lesson.id, shuffled(lesson.words)]));
-  const schedule = shuffled(lessons);
+  const choices = lessons.flatMap(lesson => lesson.words.map(word => ({ lesson, word })));
+  let deck = shuffled(choices);
   const rotation = shuffled(kinds);
   return createQuiz(shuffled(Array.from({ length: examSize }, (_, index) => {
-    const lesson = schedule[index % schedule.length];
-    const deck = decks.get(lesson.id);
-    const word = deck.pop();
-    if (!deck.length) {
-      const refill = shuffled(lesson.words.filter(other => other !== word));
-      deck.push(word, ...refill);
-    }
+    if (!deck.length) deck = shuffled(choices);
+    const { lesson, word } = deck.pop();
     return questionFor(lesson, word, rotation[index % rotation.length]);
   })));
 }
@@ -774,28 +773,15 @@ function drawExam(root) {
     drawQuiz(root, exam, true);
     return;
   }
-  const setup = examSetup ??= { volume: Math.floor((unit.id - 1) / 8), units: new Set([unit.id]), kinds: new Set(Object.keys(quizTitles)) };
-  const lessons = units.slice(setup.volume * 8, (setup.volume + 1) * 8);
-  const book = element('select');
-  book.id = 'examVolume';
-  volumes.forEach((name, index) => book.append(new Option(`第 ${index + 1} 冊 · ${name}`, index)));
-  book.value = String(setup.volume);
-  book.onchange = () => {
-    setup.volume = Number(book.value);
-    setup.units.clear();
-    draw();
-    $('examVolume').focus();
-  };
-  const bookLabel = element('label', '選擇冊別');
-  bookLabel.htmlFor = book.id;
+  const setup = examSetup ??= { volumes: new Set([Math.floor((unit.id - 1) / 8)]), kinds: new Set(Object.keys(quizTitles)) };
   const range = element('fieldset');
-  range.append(element('legend', '單元範圍（可多選）'), actions(...lessons.map(lesson => examCheckbox(`Unit ${lesson.id} · ${lesson.title}`, setup.units, lesson.id))));
+  range.append(element('legend', '選擇冊別（可多選）'), actions(...volumes.map((volume, index) => examCheckbox(`第 ${index + 1} 冊 · ${volume}`, setup.volumes, index))));
   const types = element('fieldset');
   types.append(element('legend', '題型（可多選）'), actions(...Object.entries(quizTitles).map(([kind, title]) => examCheckbox(title, setup.kinds, kind))));
   const start = button('開始 10 題綜合測驗', () => {
-    const selected = lessons.filter(lesson => setup.units.has(lesson.id));
+    const selected = units.filter(lesson => setup.volumes.has(Math.floor((lesson.id - 1) / 8)));
     if (!selected.length || !setup.kinds.size) {
-      message('請至少勾選一個單元和一種題型。', false);
+      message('請至少勾選一冊和一種題型。', false);
       return;
     }
     exam = combinedQuiz(selected, [...setup.kinds]);
@@ -805,8 +791,46 @@ function drawExam(root) {
   });
   const history = element('section', '', 'exam-history');
   history.append(element('h4', '這位學生的測驗紀錄'));
-  root.append(element('h3', '綜合測驗'), actions(bookLabel, book), range, types, actions(start), history);
+  root.append(element('h3', '綜合測驗'), element('p', '從所選冊的所有單字中隨機抽題。'), range, types, actions(start), history);
   showExamHistory(history, student);
+}
+
+async function scanMistakes(root, activeStudent) {
+  try {
+    const profile = await req(store().get(activeStudent));
+    if (!root.isConnected || student !== activeStudent || tab !== 'mistakes') return;
+    const counts = { listening: new Map(), reading: new Map() };
+    function count(kind, word, correct) {
+      if (correct !== false || typeof word !== 'string') return;
+      const category = kind === 'reading' ? counts.reading : ['quiz', 'typing'].includes(kind) ? counts.listening : null;
+      if (category) category.set(word, (category.get(word) ?? 0) + 1);
+    }
+    for (const event of profile?.events ?? []) count(event.kind, event.word, event.correct);
+    for (const result of profile?.exams ?? []) {
+      for (const answer of result.answers ?? []) count(answer.kind, answer.word, answer.correct);
+    }
+    root.replaceChildren();
+    for (const [category, title] of [['listening', '聽力'], ['reading', '朗讀']]) {
+      const section = element('section', '', 'mistake-section');
+      section.append(element('h4', title));
+      const entries = [...counts[category]].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+      if (!entries.length) section.append(element('p', '目前沒有錯誤紀錄。', 'muted'));
+      else {
+        const list = element('ol');
+        for (const [word, times] of entries) list.append(element('li', `${word} · ${times} 次`));
+        section.append(list);
+      }
+      root.append(section);
+    }
+  } catch {
+    if (root.isConnected) root.textContent = '無法讀取學生紀錄。';
+  }
+}
+
+function drawMistakes(root) {
+  const results = element('div', '', 'mistake-results');
+  root.append(element('h3', '常錯字'), element('p', '掃描目前學生的單元練習與綜合測驗紀錄。'),
+    actions(button('掃描常錯字', () => scanMistakes(results, student))), results);
 }
 
 function draw() {
@@ -814,6 +838,7 @@ function draw() {
   for (const url of reviewAudioUrls) releaseRecording(url);
   reviewAudioUrls.clear();
   $('pronunciationSetup').hidden = tab !== 'reading' && !(tab === 'exam' && exam?.questions[exam.index]?.kind === 'reading');
+  document.querySelector('.lesson-heading').hidden = tab === 'exam' || tab === 'mistakes';
   document.querySelectorAll('[data-tab]').forEach(node => node.setAttribute('aria-pressed', node.dataset.tab === tab));
   const root = $('stage');
   root.replaceChildren();
@@ -821,6 +846,7 @@ function draw() {
   if (tab === 'sound') drawSound(root);
   else if (tab === 'blend' || tab === 'record') drawPractice(root, unit.words[wordIndex]);
   else if (tab === 'exam') drawExam(root);
+  else if (tab === 'mistakes') drawMistakes(root);
   else drawQuiz(root);
 }
 
@@ -981,6 +1007,24 @@ async function init() {
     if (event.target.files[0]) restore(event.target.files[0]);
     event.target.value = '';
   };
+  $('menuToggle').onclick = () => {
+    const expanded = $('menuToggle').getAttribute('aria-expanded') === 'true';
+    $('menuToggle').setAttribute('aria-expanded', String(!expanded));
+    $('menuToggle').setAttribute('aria-label', expanded ? '開啟選單' : '關閉選單');
+    $('sideMenu').inert = expanded;
+    $('sideMenu').classList.toggle('open', !expanded);
+  };
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && $('menuToggle').getAttribute('aria-expanded') === 'true' && !$('settingsDialog').open && !$('hintDialog').open) {
+      $('menuToggle').click();
+      $('menuToggle').focus();
+    }
+  });
+  $('settingsToggle').onclick = () => {
+    $('settingsFeedback').textContent = '';
+    $('settingsDialog').showModal();
+  };
+  $('closeSettings').onclick = () => $('settingsDialog').close();
   document.querySelectorAll('[data-tab]').forEach(node => node.onclick = () => {
     if (!mayNavigate()) return;
     tab = node.dataset.tab;
@@ -1003,7 +1047,6 @@ async function init() {
     }
     resetActivities();
     unit = selected;
-    tab = 'sound';
     showUnit();
     progress().catch(reportStorageError);
   };

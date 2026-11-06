@@ -13,6 +13,35 @@
   <script src="./app.js" defer></script>
 </head>
 <body>
+  <button id="menuToggle" class="corner-button menu-toggle" type="button" aria-expanded="false" aria-controls="sideMenu" aria-label="開啟選單">☰</button>
+  <button id="settingsToggle" class="corner-button settings-toggle" type="button" aria-haspopup="dialog" aria-label="開啟工具設定">⚙</button>
+  <nav id="sideMenu" class="side-menu" aria-label="練習與測驗" inert>
+    <p class="eyebrow">選擇功能</p>
+    <button data-tab="sound">聽音</button>
+    <button data-tab="blend">拼讀</button>
+    <button data-tab="record">錄音跟讀</button>
+    <button data-tab="quiz">聽力測驗</button>
+    <button data-tab="typing">聽力打字</button>
+    <button data-tab="reading">朗讀測驗</button>
+    <button data-tab="exam">綜合測驗</button>
+    <button data-tab="mistakes">常錯字</button>
+  </nav>
+  <dialog id="settingsDialog" aria-labelledby="settingsTitle">
+    <div class="dialog-heading"><h2 id="settingsTitle">工具與設定</h2><button id="closeSettings" type="button" class="secondary" aria-label="關閉工具設定">✕</button></div>
+    <section class="global-settings" aria-labelledby="hintSettingsTitle">
+      <h3 id="hintSettingsTitle">全域提示設定</h3>
+      <p>選擇聽力題要顯示的提示按鈕，並設定每題每種提示的使用次數。</p>
+      <div id="hintSettings" class="actions"></div>
+      <p id="hintSettingsStatus" role="status"></p>
+    </section>
+    <section class="backup" aria-label="備份進度">
+      <h3>備份與還原</h3>
+      <button id="export" class="secondary">匯出 JSON 備份</button>
+      <label class="file-label">匯入備份 <input type="file" id="import" accept=".json,application/json"></label>
+      <p>備份包含學生進度與試卷，錄音留在原瀏覽器。</p>
+    </section>
+    <p id="settingsFeedback" role="status" aria-live="polite"></p>
+  </dialog>
   <main>
     <header class="hero">
       <p class="eyebrow" lang="en">THE PHONICS STUDIO</p>
@@ -24,12 +53,6 @@
       </svg>
     </header>
 
-    <section class="panel global-settings" aria-labelledby="settingsTitle">
-      <h2 id="settingsTitle">全域提示設定</h2>
-      <p>選擇聽力題要顯示的提示按鈕，並設定每題每種提示的使用次數。</p>
-      <div id="hintSettings" class="actions"></div>
-      <p id="hintSettingsStatus" role="status"></p>
-    </section>
     <dialog id="hintDialog" aria-labelledby="hintDialogTitle">
       <h2 id="hintDialogTitle">提示</h2>
       <p id="hintDialogContent"></p>
@@ -44,15 +67,6 @@
         </div>
         <label class="unit-picker">教材單元 <select id="unitPicker"></select></label>
       </div>
-      <nav class="tabs" aria-label="練習與測驗">
-        <button data-tab="sound">聽音</button>
-        <button data-tab="blend">拼讀</button>
-        <button data-tab="record">錄音跟讀</button>
-        <button data-tab="quiz">聽力測驗</button>
-        <button data-tab="typing">聽力打字</button>
-        <button data-tab="reading">朗讀測驗</button>
-        <button data-tab="exam">綜合測驗</button>
-      </nav>
       <details id="pronunciationSetup" hidden>
         <summary>發音判定設定</summary>
         <p>使用已部署的評估網址及課堂使用碼（Function Key）。設定會儲存在這個瀏覽器。勾選啟用後，錄音才會送往所填網址。</p>
@@ -78,10 +92,6 @@
         </div>
         <p id="summary"></p>
         <progress id="progress" value="0" max="1" aria-label="已練習單字"></progress>
-        <div class="actions backup">
-          <button id="export" class="secondary">匯出 JSON 備份</button>
-          <label class="file-label">匯入備份 <input type="file" id="import" accept=".json,application/json"></label>
-        </div>
     </section>
     <footer>學習進度與綜合測驗錄音儲存在這個瀏覽器。啟用發音判定時，朗讀錄音會傳送至評估服務。</footer>
   </main>
