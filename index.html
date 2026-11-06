@@ -22,9 +22,9 @@
     <button data-tab="record">跟讀練習</button>
     <button data-tab="quiz">聽力選擇題測驗</button>
     <button data-tab="typing">聽力打字測驗</button>
-    <button data-tab="reading">朗讀測驗</button>
     <button data-tab="exam">綜合測驗</button>
     <button data-tab="mistakes">常錯字</button>
+    <button id="studentsToggle" type="button" aria-haspopup="dialog">學生與本機進度</button>
     <button id="settingsToggle" type="button" aria-haspopup="dialog">設定</button>
   </nav>
   <dialog id="settingsDialog" aria-labelledby="settingsTitle">
@@ -43,11 +43,25 @@
     </section>
     <p id="settingsFeedback" role="status" aria-live="polite"></p>
   </dialog>
+  <dialog id="studentsDialog" aria-labelledby="studentsTitle">
+    <div class="dialog-heading"><h2 id="studentsTitle">學生與本機進度</h2><button id="closeStudents" type="button" class="secondary" aria-label="關閉學生與本機進度">✕</button></div>
+    <div class="students">
+      <div class="actions">
+        <label class="sr-only" for="student">目前學生</label>
+        <select id="student"></select>
+        <label class="sr-only" for="newStudent">新學生名稱</label>
+        <input id="newStudent" placeholder="新學生名稱" maxlength="30">
+        <button id="addStudent" class="secondary">新增學生</button>
+      </div>
+      <p id="summary"></p>
+      <progress id="progress" value="0" max="1" aria-label="已練習單字"></progress>
+      <p id="studentsFeedback" role="status" aria-live="polite"></p>
+    </div>
+  </dialog>
   <main>
     <header class="hero">
       <p class="eyebrow" lang="en">THE PHONICS STUDIO</p>
       <h1><span lang="en">Phonics</span> 聽音跟讀</h1>
-      <p>從一個聲音開始，聽懂、拼讀，再大聲念出來。</p>
       <svg class="hero-art" viewBox="0 0 120 120" aria-hidden="true">
         <path d="M60 6c1 34 10 48 52 54-42 5-51 19-52 54-4-35-15-48-52-54C45 54 56 40 60 6Z" fill="none" stroke="currentColor" stroke-width="2"/>
         <path d="M60 34v52M34 60h52M43 43l34 34m0-34L43 77" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -82,18 +96,6 @@
       <p id="feedback" role="status" aria-live="polite"></p>
     </section>
 
-    <section class="panel students" aria-labelledby="studentsTitle">
-        <h2 id="studentsTitle">學生與本機進度</h2>
-        <div class="actions">
-          <label class="sr-only" for="student">目前學生</label>
-          <select id="student"></select>
-          <label class="sr-only" for="newStudent">新學生名稱</label>
-          <input id="newStudent" placeholder="新學生名稱" maxlength="30">
-          <button id="addStudent" class="secondary">新增學生</button>
-        </div>
-        <p id="summary"></p>
-        <progress id="progress" value="0" max="1" aria-label="已練習單字"></progress>
-    </section>
     <footer>學習進度與綜合測驗錄音儲存在這個瀏覽器。啟用發音判定時，朗讀錄音會傳送至評估服務。</footer>
   </main>
 </body>

@@ -41,6 +41,10 @@ function message(text, good = true) {
     $('settingsFeedback').textContent = text;
     $('settingsFeedback').className = good ? 'ok' : 'bad';
   }
+  if ($('studentsDialog').open) {
+    $('studentsFeedback').textContent = text;
+    $('studentsFeedback').className = good ? 'ok' : 'bad';
+  }
 }
 
 function element(tag, text = '', className = '') {
@@ -1023,7 +1027,7 @@ async function init() {
     }
   });
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && $('menuToggle').getAttribute('aria-expanded') === 'true' && !$('settingsDialog').open && !$('hintDialog').open) {
+    if (event.key === 'Escape' && $('menuToggle').getAttribute('aria-expanded') === 'true' && !$('settingsDialog').open && !$('studentsDialog').open && !$('hintDialog').open) {
       $('menuToggle').click();
       $('menuToggle').focus();
     }
@@ -1035,6 +1039,13 @@ async function init() {
   };
   $('closeSettings').onclick = () => $('settingsDialog').close();
   $('settingsDialog').onclose = () => $('menuToggle').focus();
+  $('studentsToggle').onclick = () => {
+    if ($('menuToggle').getAttribute('aria-expanded') === 'true') $('menuToggle').click();
+    $('studentsFeedback').textContent = '';
+    $('studentsDialog').showModal();
+  };
+  $('closeStudents').onclick = () => $('studentsDialog').close();
+  $('studentsDialog').onclose = () => $('menuToggle').focus();
   document.querySelectorAll('[data-tab]').forEach(node => node.onclick = () => {
     if (!mayNavigate()) return;
     tab = node.dataset.tab;
