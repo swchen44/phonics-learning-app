@@ -24,6 +24,18 @@
       </svg>
     </header>
 
+    <section class="panel global-settings" aria-labelledby="settingsTitle">
+      <h2 id="settingsTitle">全域提示設定</h2>
+      <p>選擇聽力題要顯示的提示按鈕，並設定每題每種提示的使用次數。</p>
+      <div id="hintSettings" class="actions"></div>
+      <p id="hintSettingsStatus" role="status"></p>
+    </section>
+    <dialog id="hintDialog" aria-labelledby="hintDialogTitle">
+      <h2 id="hintDialogTitle">提示</h2>
+      <p id="hintDialogContent"></p>
+      <form method="dialog"><button>關閉並繼續作答</button></form>
+    </dialog>
+
     <section id="lesson" class="panel" aria-labelledby="unitTitle">
       <div class="lesson-heading">
         <div>

@@ -81,6 +81,13 @@ progress { width: 100%; accent-color: var(--good); }
 .exam-errors li { padding: .35rem 0; }
 .exam-mistake { color: #9d382e; }
 .exam-errors select { margin-top: .4rem; }
+.global-settings { margin-bottom: 1rem; }
+.global-settings p { margin: .5rem 0; }
+.global-settings fieldset { display: grid; gap: .35rem; }
+.global-settings input[type=number] { width: 5rem; }
+#hintDialog { max-width: min(24rem, 90vw); border: 1px solid var(--line); border-radius: 1rem; padding: 1.4rem; background: var(--panel); color: var(--ink); }
+#hintDialog::backdrop { background: #27241f88; }
+#hintDialog p { margin: 1rem 0; font-size: 1.5rem; }
 .file-label { display: grid; gap: .25rem; max-width: 100%; color: var(--muted); font-size: .9rem; }
 .file-label input { max-width: 100%; }
 footer { margin-top: 1.25rem; font-size: .88rem; }

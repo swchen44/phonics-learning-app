@@ -3,6 +3,9 @@
 const questionsPerQuiz = 5;
 const examSize = 10;
 const quizTitles = { quiz: '聽力測驗', typing: '聽力打字', reading: '朗讀測驗' };
+const hintTitles = { first: '第一個字母', last: '最後一個字母', vowel: '母音字母' };
+const hintSettingsKey = 'phonics-hint-settings';
+let hintSettings = Object.fromEntries(Object.keys(hintTitles).map(kind => [kind, { enabled: false, limit: 1 }]));
 const settingsKey = 'phonics-pronunciation-settings';
 const $ = id => document.getElementById(id);
 const svgNamespace = 'http://www.w3.org/2000/svg';
@@ -355,6 +358,90 @@ function readingFeedback(assessment) {
   message(hints[outcome], outcome === 'clear' || outcome === 'pending');
 }
 
+function hintButtons(quiz, word) {
+  quiz.hintUses ??= {};
+  const uses = quiz.hintUses[quiz.index] ??= {};
+  const row = actions();
+  row.id = 'hintButtons';
+  for (const [kind, title] of Object.entries(hintTitles)) {
+    const setting = hintSettings[kind];
+    if (!setting.enabled) continue;
+    const remaining = Math.max(0, setting.limit - (uses[kind] ?? 0));
+    const control = button(`${title}（剩餘 ${remaining} 次）`, () => {
+      if (quiz.selected || (uses[kind] ?? 0) >= hintSettings[kind].limit) return;
+      uses[kind] = (uses[kind] ?? 0) + 1;
+      const value = kind === 'vowel' ? [...word.w].filter(letter => 'aeiou'.includes(letter)).map(letter => letter.toUpperCase()).join('、') :
+        (kind === 'first' ? word.w[0] : word.w.at(-1)).toUpperCase();
+      $('hintDialogTitle').textContent = title;
+      $('hintDialogContent').textContent = value || '這個單字沒有 a、e、i、o、u 母音字母。';
+      $('hintDialog').showModal();
+      control.textContent = `${title}（剩餘 ${Math.max(0, hintSettings[kind].limit - uses[kind])} 次）`;
+      control.disabled = uses[kind] >= hintSettings[kind].limit;
+    }, true);
+    control.disabled = remaining === 0 || Boolean(quiz.selected);
+    row.append(control);
+  }
+  return row;
+}
+
+function initHintSettings() {
+  const root = $('hintSettings');
+  const status = $('hintSettingsStatus');
+  try {
+    const saved = JSON.parse(localStorage.getItem(hintSettingsKey));
+    for (const kind of Object.keys(hintTitles)) {
+      if (typeof saved?.[kind]?.enabled === 'boolean' && Number.isInteger(saved[kind].limit) && saved[kind].limit >= 1 && saved[kind].limit <= 99) {
+        hintSettings[kind] = saved[kind];
+      }
+    }
+  } catch {
+    status.textContent = '無法讀取提示設定。';
+  }
+  for (const [kind, title] of Object.entries(hintTitles)) {
+    const group = element('fieldset');
+    const enabled = element('input');
+    enabled.type = 'checkbox';
+    enabled.checked = hintSettings[kind].enabled;
+    const enabledLabel = element('label');
+    enabledLabel.append(enabled, ` 顯示${title}按鈕`);
+    const limit = element('input');
+    limit.type = 'number';
+    limit.min = '1';
+    limit.max = '99';
+    limit.step = '1';
+    limit.value = hintSettings[kind].limit;
+    limit.setAttribute('aria-label', `${title}每題次數`);
+    const limitLabel = element('label');
+    limitLabel.append('每題次數 ', limit);
+    const save = () => {
+      const count = Number(limit.value);
+      if (!Number.isInteger(count) || count < 1 || count > 99) {
+        status.textContent = '每題次數請填 1 到 99 的整數。';
+        enabled.checked = hintSettings[kind].enabled;
+        return;
+      }
+      const next = { ...hintSettings, [kind]: { enabled: enabled.checked, limit: count } };
+      try {
+        localStorage.setItem(hintSettingsKey, JSON.stringify(next));
+        hintSettings = next;
+        status.textContent = '提示設定已儲存。';
+        const quiz = tab === 'exam' ? exam : quizzes[tab];
+        const question = quiz?.questions[quiz.index];
+        const current = $('hintButtons');
+        if (current && question && ['quiz', 'typing'].includes(question.kind)) current.replaceWith(hintButtons(quiz, question.word));
+      } catch {
+        enabled.checked = hintSettings[kind].enabled;
+        limit.value = hintSettings[kind].limit;
+        status.textContent = '無法儲存提示設定。';
+      }
+    };
+    enabled.onchange = save;
+    limit.onchange = save;
+    group.append(element('legend', title), enabledLabel, limitLabel);
+    root.append(group);
+  }
+}
+
 function drawQuiz(root, quiz = quizzes[tab] ??= unitQuiz(tab), combined = false) {
   const total = quiz.questions.length;
   if (quiz.index === total) {
@@ -371,6 +458,7 @@ function drawQuiz(root, quiz = quizzes[tab] ??= unitQuiz(tab), combined = false)
   const listening = mode === 'quiz';
   const reading = mode === 'reading';
   root.append(element('h3', quizTitles[mode]), element('p', `第 ${quiz.index + 1} / ${total} 題${combined ? ` · Unit ${questionUnit}` : ''}`, 'question-counter'));
+  if (!reading) root.append(hintButtons(quiz, word));
   const next = button(quiz.index + 1 === total ? '看結果 →' : '下一題 →', () => {
     if (next.disabled || !mayNavigate() || quiz.questions[quiz.index]?.word !== word) return;
     next.disabled = true;
@@ -418,7 +506,7 @@ function drawQuiz(root, quiz = quizzes[tab] ??= unitQuiz(tab), combined = false)
     root.append(grid);
     if (quiz.selected) message(quiz.selected === word ? '答對了！' : `正確答案是 ${word.w}。可以再聽一次。`, quiz.selected === word);
   } else if (mode === 'typing') {
-    root.append(element('p', '聽慢速發音，輸入完整單字。'), element('p', word.w[0].toUpperCase(), 'word'),
+    root.append(element('p', '聽慢速發音，輸入完整單字。'),
       actions(button('🔊 慢速播放', () => speak(word.w, 0.6), true)));
     const input = element('input');
     input.id = 'typingAnswer';
@@ -857,6 +945,7 @@ async function init() {
   db.onversionchange = () => db.close();
   await students();
   initPronunciationSettings();
+  initHintSettings();
 
   $('student').onchange = event => {
     if (!mayNavigate()) {
