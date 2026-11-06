@@ -2,7 +2,7 @@
 
 const questionsPerQuiz = 5;
 const examSize = 10;
-const quizTitles = { quiz: '聽力測驗', typing: '聽力打字', reading: '朗讀測驗' };
+const quizTitles = { quiz: '聽力選擇題測驗', typing: '聽力打字測驗', reading: '朗讀測驗' };
 const hintTitles = { first: '第一個字母', last: '最後一個字母', vowel: '母音字母' };
 const hintSettingsKey = 'phonics-hint-settings';
 let hintSettings = Object.fromEntries(Object.keys(hintTitles).map(kind => [kind, { enabled: false, limit: 1 }]));
@@ -294,7 +294,7 @@ function nextWordButton() {
 }
 
 function drawSound(root) {
-  root.append(element('h3', `聽音 · ${unit.focus}`), element('p', '先聽單字，再試著把每個聲音連起來。'));
+  root.append(element('h3', `音標練習 · ${unit.focus}`), element('p', '先聽單字，再試著把每個聲音連起來。'));
   const examples = element('div', '', 'examples');
   for (const word of unit.words) {
     const group = element('fieldset');
@@ -308,7 +308,7 @@ function drawSound(root) {
 
 function drawPractice(root, word) {
   const following = tab === 'record';
-  root.append(element('h3', following ? '聽音後跟讀' : '逐音拼讀'), wordLabel(word, true),
+  root.append(element('h3', following ? '跟讀練習' : '拼讀練習'), wordLabel(word, true),
     element('p', `${word.p.map(sound => `/${sound}/`).join(' + ')} · ${word.zh}`, 'phonemes'),
     pronunciationButtons(word, following ? undefined : () => log('listen', word, true)));
   if (following) {
