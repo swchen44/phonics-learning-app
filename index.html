@@ -14,7 +14,7 @@
 </head>
 <body>
   <button id="menuToggle" class="corner-button menu-toggle" type="button" aria-expanded="false" aria-controls="sideMenu" aria-label="開啟選單">☰</button>
-  <button id="settingsToggle" class="corner-button settings-toggle" type="button" aria-haspopup="dialog" aria-label="開啟工具設定">⚙</button>
+  <div id="menuBackdrop" class="menu-backdrop" hidden></div>
   <nav id="sideMenu" class="side-menu" aria-label="練習與測驗" inert>
     <p class="eyebrow">選擇功能</p>
     <button data-tab="sound">聽音</button>
@@ -25,6 +25,7 @@
     <button data-tab="reading">朗讀測驗</button>
     <button data-tab="exam">綜合測驗</button>
     <button data-tab="mistakes">常錯字</button>
+    <button id="settingsToggle" type="button" aria-haspopup="dialog">設定</button>
   </nav>
   <dialog id="settingsDialog" aria-labelledby="settingsTitle">
     <div class="dialog-heading"><h2 id="settingsTitle">工具與設定</h2><button id="closeSettings" type="button" class="secondary" aria-label="關閉工具設定">✕</button></div>

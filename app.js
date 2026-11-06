@@ -1012,8 +1012,10 @@ async function init() {
     $('menuToggle').setAttribute('aria-expanded', String(!expanded));
     $('menuToggle').setAttribute('aria-label', expanded ? '開啟選單' : '關閉選單');
     $('sideMenu').inert = expanded;
+    $('menuBackdrop').hidden = expanded;
     $('sideMenu').classList.toggle('open', !expanded);
   };
+  $('menuBackdrop').onclick = () => $('menuToggle').click();
   document.addEventListener('click', event => {
     if ($('menuToggle').getAttribute('aria-expanded') === 'true' &&
         !$('menuToggle').contains(event.target) && !$('sideMenu').contains(event.target)) {
@@ -1027,10 +1029,12 @@ async function init() {
     }
   });
   $('settingsToggle').onclick = () => {
+    if ($('menuToggle').getAttribute('aria-expanded') === 'true') $('menuToggle').click();
     $('settingsFeedback').textContent = '';
     $('settingsDialog').showModal();
   };
   $('closeSettings').onclick = () => $('settingsDialog').close();
+  $('settingsDialog').onclose = () => $('menuToggle').focus();
   document.querySelectorAll('[data-tab]').forEach(node => node.onclick = () => {
     if (!mayNavigate()) return;
     tab = node.dataset.tab;
