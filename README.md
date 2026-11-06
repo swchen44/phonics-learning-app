@@ -1,19 +1,53 @@
-# Phonics 聽音跟讀 App
+# Phonics 聽音跟讀
 
-GitHub Pages 靜態 Web App。Unit 1 提供附插圖的短母音練習、拼讀、錄音跟讀，以及每輪各五題的聽力與朗讀測驗。聽力顯示答對題數，朗讀錄音後可重聽及比對示範音，並記錄完成題數。學生進度儲存在 IndexedDB，支援 JSON 備份與還原。
+以繁體中文輔助學習的美式自然發音 App。教材是自編的四冊 32 單元，共 161 個附圖單字。每單元提供聽音、拼讀、錄音跟讀、五題聽力與五題朗讀。課程順序參考 [IES 基礎閱讀技能指南](https://ies.ed.gov/ncee/wwc/PracticeGuide/21/)。
 
-## 啟用 GitHub Pages
+[開啟 GitHub Pages](https://swchen44.github.io/phonics-learning-app/)
 
-Settings → Pages → Build and deployment → Source 選 **GitHub Actions**。main 分支推送後工作流程自動部署。
+## 從新電腦啟動
 
-網址：https://swchen44.github.io/phonics-learning-app/
+```sh
+git clone https://github.com/swchen44/phonics-learning-app.git
+cd phonics-learning-app
+python -m http.server 8080
+```
 
-## 本機執行
+開啟 <http://localhost:8080>。前端無需安裝套件。允許瀏覽器使用麥克風即可測試錄音。正式站用 HTTPS，開發時用 `localhost`，直接開啟 HTML 檔案會影響麥克風、插圖和離線快取。
 
-`python3 -m http.server 8080`，瀏覽 http://localhost:8080 。
+## 備份、重置和還原
 
-## 目前限制
+1. 在「學生與本機進度」按「匯出 JSON 備份」。備份包含所有學生的學習事件，不含錄音。
+2. 如要清除這個 App 的學生資料，先關閉同一網站的其他分頁。在 Chrome 或 Edge 開啟開發人員工具，選 **Application → IndexedDB → `phonics-progress` → Delete database**。重新整理後，應看到新的「學生 1」和空白進度。
+3. 如要還原，按「匯入備份」選 JSON。相同學生 ID 的資料會被備份覆蓋。
 
-只有 Unit 1 示範；其餘 31 單元尚未製作。使用裝置內建英文語音合成，非經校訂的獨立音素音檔。錄音供學生重聽，不會自動評分，且重整後不保留音檔。進度存在瀏覽器 IndexedDB，可能因清除網站資料而遺失；請定期匯出 JSON。
+如果只是看不到新版，先強制重新整理。仍載入舊版時，在 **Application → Service Workers** 取消註冊這個 App 的 Service Worker，再重新整理。清除學生資料與重新載入程式是分開的操作。
 
-新增單元時，在 `app.js` 的 `units` 加入單元資料與至少五個不同的單字，再於 `pictures.svg` 加入相對應的插圖。每個開放單元共用聽力、朗讀與進度流程。
+## 交接修改
+
+| 要改什麼 | 從這裡開始 |
+| --- | --- |
+| 單元、音素、翻譯、小圖 | `curriculum.js`。每單元至少五個不同的單字。插圖欄位可用 emoji，或用 `#名稱` 連到 `pictures.svg` 的 `<symbol>`。|
+| 測驗、錄音、備份與進度 | `app.js`。各單元共用測驗邏輯。保留現有單元 ID，舊的 IndexedDB 和 JSON 才能對應原有單元。|
+| 版面與離線 | `index.html`、`styles.css`、`manifest.webmanifest`。新增前端檔案時，更新 `sw.js` 的快取清單和版本。|
+| 發音判定 | `pronunciation.js` 負責送出錄音，`api/pronunciation.js` 負責呼叫評估服務與解讀結果。|
+
+交接時提供 Git 分支或提交編號、要改的單元、測過的流程，以及是否已配置發音判定。新接手的人先讀本檔，依上方步驟啟動，再做下列驗收。
+
+## 驗收與部署
+
+1. 執行 `git diff --check`，再用 `node --check` 檢查修改過的 JavaScript。
+2. 打開網站，切換第 1、16、32 單元。確認標題、圖片、單字、進度切換正確。兩種測驗各完成一輪，確認每輪五題、聽力能計分、朗讀錄音能重聽及重錄。
+3. 檢查窄螢幕下的單元選單和測驗選項。備份後用新瀏覽器設定檔匯入，確認原有進度可讀。
+4. GitHub 專案的 **Settings → Pages → Build and deployment → Source** 選 **GitHub Actions**。推送 `main` 後，等 **Deploy GitHub Pages** 成功，再打開公開網站確認新內容。
+5. 要回復上一個上線版本，在 `main` 用 `git revert <要回復的提交>` 建立回復提交，再推送並確認部署。這會保留 Git 歷史，瀏覽器中的學習資料另由備份處理。
+
+## 啟用朗讀發音判定
+
+未設定評估服務時，各單元可錄音、重聽及比對示範音。要在每題錄完後顯示發音判定，需有 Azure Speech 資源與 Azure Function App。
+
+1. 用 Node.js 22 的 Azure Functions 部署 `api/`，在 Function App 的應用程式設定加入 `AZURE_SPEECH_RESOURCE` 與 `AZURE_SPEECH_KEY`，並允許 `https://swchen44.github.io` 的跨來源請求。Speech 金鑰留在後端。
+2. 將函式的 HTTPS 網址填入 `index.html` 的 `pronunciation-endpoint`。使用 `/api/pronunciation` 的網址，憑證由下一步單獨輸入。
+3. 在朗讀測驗開啟「發音判定設定」，輸入該函式專用的存取金鑰作為課堂使用碼，再勾選啟用。啟用後，每題最多 10 秒的朗讀錄音會送至 Microsoft Azure 分析。
+4. 用真人錄音分別測試清楚發音、念錯母音和無聲錄音。確認每題顯示判定或重錄提示，關閉判定後仍可在本機錄音。
+
+目前判定以美式英文的單字和音素準確度為準。兩者都達 60 且服務未標示錯誤時，顯示「念得清楚」。聽不清楚或服務失敗時會提示重錄。這是練習回饋，門檻可在取得真人測試資料後調整。[Microsoft Speech 短音訊評估說明](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-speech-to-text-short)

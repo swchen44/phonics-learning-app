@@ -1,0 +1,7 @@
+{
+  "name": "phonics-pronunciation-api",
+  "private": true,
+  "main": "index.js",
+  "engines": { "node": "22.x" },
+  "dependencies": { "@azure/functions": "^4.0.0" }
+}

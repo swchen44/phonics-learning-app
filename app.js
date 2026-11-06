@@ -1,20 +1,5 @@
 'use strict';
 
-const units = [{
-  id: 1,
-  title: 'Short a',
-  soundTitle: '聽短母音 /æ/',
-  soundHint: '先聽單字中的短母音。嘴巴張開，發出短促的 /æ/。',
-  examples: ['cat', 'bat'],
-  words: [
-    { w: 'cat', zh: '貓', p: ['/k/', '/æ/', '/t/'], picture: 'cat' },
-    { w: 'bat', zh: '蝙蝠', p: ['/b/', '/æ/', '/t/'], picture: 'bat' },
-    { w: 'hat', zh: '帽子', p: ['/h/', '/æ/', '/t/'], picture: 'hat' },
-    { w: 'jam', zh: '果醬', p: ['/dʒ/', '/æ/', '/m/'], picture: 'jam' },
-    { w: 'ram', zh: '公羊', p: ['/r/', '/æ/', '/m/'], picture: 'ram' },
-    { w: 'can', zh: '罐子', p: ['/k/', '/æ/', '/n/'], picture: 'can' },
-  ],
-}];
 const questionsPerQuiz = 5;
 const $ = id => document.getElementById(id);
 const svgNamespace = 'http://www.w3.org/2000/svg';
@@ -68,11 +53,15 @@ function wordLabel(word, large = false) {
   label.lang = 'en';
   const picture = element('span', '', 'word-picture');
   picture.setAttribute('aria-hidden', 'true');
-  const svg = document.createElementNS(svgNamespace, 'svg');
-  const use = document.createElementNS(svgNamespace, 'use');
-  use.setAttribute('href', `./pictures.svg#${word.picture}`);
-  svg.append(use);
-  picture.append(svg);
+  if (word.illustration.startsWith('#')) {
+    const svg = document.createElementNS(svgNamespace, 'svg');
+    const use = document.createElementNS(svgNamespace, 'use');
+    use.setAttribute('href', `./pictures.svg${word.illustration}`);
+    svg.append(use);
+    picture.append(svg);
+  } else {
+    picture.textContent = word.illustration;
+  }
   label.append(picture, word.w);
   return label;
 }
@@ -182,6 +171,7 @@ function releaseRecording(url) {
 }
 
 function resetActivities() {
+  quizzes.reading?.assessmentRequest?.abort();
   releaseRecording(quizzes.reading?.recordingUrl);
   releaseRecording(practiceRecording?.url);
   quizzes = {};
@@ -234,7 +224,7 @@ function recordingControls(onComplete, hasRecording) {
           message('沒有錄到聲音，請再試一次。', false);
           return;
         }
-        onComplete(URL.createObjectURL(blob));
+        onComplete(URL.createObjectURL(blob), blob);
       };
       recorder.start();
       stop.disabled = false;
@@ -262,9 +252,9 @@ function nextWordButton() {
 }
 
 function drawSound(root) {
-  root.append(element('h3', unit.soundTitle), element('p', unit.soundHint));
+  root.append(element('h3', `聽音 · ${unit.focus}`), element('p', '先聽單字，再試著把每個聲音連起來。'));
   const examples = element('div', '', 'examples');
-  for (const word of unit.words.filter(word => unit.examples.includes(word.w))) {
+  for (const word of unit.words) {
     const group = element('fieldset');
     const label = element('legend');
     label.append(wordLabel(word));
@@ -277,7 +267,7 @@ function drawSound(root) {
 function drawPractice(root, word) {
   const following = tab === 'record';
   root.append(element('h3', following ? '聽音後跟讀' : '逐音拼讀'), wordLabel(word, true),
-    element('p', `${word.p.join(' + ')} · ${word.zh}`, 'phonemes'),
+    element('p', `${word.p.map(sound => `/${sound}/`).join(' + ')} · ${word.zh}`, 'phonemes'),
     pronunciationButtons(word, following ? undefined : () => log('listen', word, true)));
   if (following) {
     const saved = practiceRecording?.word === word ? practiceRecording.url : '';
@@ -291,6 +281,43 @@ function drawPractice(root, word) {
     if (saved) root.append(recordingPlayer(saved));
   }
   root.append(actions(nextWordButton()));
+}
+
+async function checkReading(quiz, word, clip) {
+  if (!pronunciationEndpoint || !$('pronunciationConsent').checked) return;
+  const accessKey = $('pronunciationAccess').value.trim();
+  if (!accessKey) {
+    quiz.assessment = { outcome: 'access-denied' };
+    draw();
+    return;
+  }
+  const request = new AbortController();
+  quiz.assessmentRequest = request;
+  quiz.assessment = { outcome: 'pending' };
+  draw();
+  const result = await assessPronunciation(word.w, clip, accessKey, request.signal);
+  if (request.signal.aborted) return;
+  quiz.assessmentRequest = null;
+  quiz.assessment = result;
+  if (tab === 'reading' && quizzes.reading === quiz) draw();
+}
+
+function readingFeedback(assessment) {
+  if (!assessment) {
+    message('已錄音。可以重聽、比較示範音，或重新錄音。');
+    return;
+  }
+  const { outcome, sounds } = assessment;
+  const hints = {
+    pending: '正在判定發音…',
+    clear: '念得清楚！',
+    retry: sounds?.length ? `再試一次，留意 ${sounds.map(sound => `/${sound}/`).join('、')}。` : '再試一次，請只念畫面上的單字。',
+    unheard: '沒有聽清楚，請靠近麥克風再錄一次。',
+    'too-long': '請在 10 秒內只念這個單字，再錄一次。',
+    'access-denied': '請確認發音判定設定中的課堂使用碼，再錄一次。',
+    unavailable: '這次無法判定。可以重聽錄音或稍後再試。',
+  };
+  message(hints[outcome], outcome === 'clear' || outcome === 'pending');
 }
 
 function drawQuiz(root) {
@@ -310,15 +337,18 @@ function drawQuiz(root) {
   const next = button(quiz.index + 1 === total ? '看結果 →' : '下一題 →', () => {
     if (!mayNavigate()) return;
     if (!listening) {
-      log('reading', word);
+      const outcome = quiz.assessment?.outcome;
+      const correct = outcome === 'clear' ? true : outcome === 'retry' ? false : undefined;
+      log('reading', word, correct);
       releaseRecording(quiz.recordingUrl);
       quiz.recordingUrl = '';
+      quiz.assessment = null;
     }
     quiz.index++;
     quiz.selected = null;
     draw();
   });
-  next.disabled = listening ? !quiz.selected : !quiz.recordingUrl;
+  next.disabled = listening ? !quiz.selected : !quiz.recordingUrl || Boolean(quiz.assessmentRequest);
 
   if (listening) {
     root.append(element('p', '先聽發音，再選出聽到的單字。'), pronunciationButtons(word));
@@ -342,19 +372,23 @@ function drawQuiz(root) {
     root.append(grid);
     if (quiz.selected) message(quiz.selected === word ? '答對了！' : `正確答案是 ${word.w}。可以再聽一次。`, quiz.selected === word);
   } else {
-    root.append(element('p', '看單字，大聲念出來並錄音。'), wordLabel(word, true),
-      recordingControls(url => {
+    root.append(element('p', '看單字，大聲念出來並錄音。'), wordLabel(word, true));
+    if (!quiz.assessmentRequest) {
+      root.append(recordingControls((url, clip) => {
         releaseRecording(quiz.recordingUrl);
         quiz.recordingUrl = url;
+        quiz.assessment = null;
         draw();
-        message('已錄音。可以重聽、比較示範音，或重新錄音。');
+        checkReading(quiz, word, clip);
       }, quiz.recordingUrl));
+    }
     if (quiz.recordingUrl) {
       const review = element('div', '', 'recording-box');
       review.append(recordingPlayer(quiz.recordingUrl), pronunciationButtons(word));
       root.append(review);
+      readingFeedback(quiz.assessment);
     }
-    root.append(element('p', '錄音供自我比對。這項測驗記錄完成題數。', 'muted'));
+    root.append(element('p', pronunciationEndpoint ? '啟用發音判定後，可查看每題的判定與練習提示。' : '目前可錄音並比對示範音，發音判定服務尚未連線。', 'muted'));
   }
   next.classList.add('quiz-next');
   root.append(actions(next));
@@ -362,6 +396,7 @@ function drawQuiz(root) {
 
 function draw() {
   window.speechSynthesis?.cancel();
+  $('pronunciationSetup').hidden = tab !== 'reading' || !pronunciationEndpoint;
   document.querySelectorAll('[data-tab]').forEach(node => node.setAttribute('aria-pressed', node.dataset.tab === tab));
   const root = $('stage');
   root.replaceChildren();
@@ -374,7 +409,7 @@ function draw() {
 function showUnit() {
   $('unitNumber').textContent = `UNIT ${String(unit.id).padStart(2, '0')}`;
   $('unitTitle').textContent = unit.title;
-  $('units').querySelectorAll('button').forEach(node => node.setAttribute('aria-pressed', Number(node.dataset.unit) === unit.id));
+  $('unitPicker').value = String(unit.id);
   draw();
 }
 
@@ -414,6 +449,7 @@ async function init() {
   const request = indexedDB.open('phonics-progress', 1);
   request.onupgradeneeded = () => request.result.createObjectStore('students', { keyPath: 'id' });
   db = await req(request);
+  db.onversionchange = () => db.close();
   await students();
 
   $('student').onchange = event => {
@@ -455,21 +491,27 @@ async function init() {
     tab = node.dataset.tab;
     draw();
   });
-  for (const available of units) {
-    const control = button(`Unit ${available.id} · ${available.title}`, () => {
-      if (!mayNavigate()) return;
-      if (unit !== available) resetActivities();
-      unit = available;
-      tab = 'sound';
-      showUnit();
-      progress().catch(reportStorageError);
-      $('lesson').scrollIntoView({ behavior: 'smooth' });
-    }, true);
-    control.dataset.unit = available.id;
-    $('units').append(control);
+  const picker = $('unitPicker');
+  for (const [index, volume] of volumes.entries()) {
+    const group = document.createElement('optgroup');
+    group.label = `第 ${index + 1} 冊 · ${volume}`;
+    for (const available of units.slice(index * 8, (index + 1) * 8)) {
+      group.append(new Option(`Unit ${available.id} · ${available.title}`, available.id));
+    }
+    picker.append(group);
   }
-  const remaining = 32 - units.length;
-  $('unitAvailability').textContent = remaining ? `已開放 ${units.length} 個單元，其餘 ${remaining} 個單元待製作。` : '32 個單元皆已開放。';
+  picker.onchange = () => {
+    const selected = units.find(item => item.id === Number(picker.value));
+    if (!selected || !mayNavigate()) {
+      picker.value = String(unit.id);
+      return;
+    }
+    resetActivities();
+    unit = selected;
+    tab = 'sound';
+    showUnit();
+    progress().catch(reportStorageError);
+  };
   showUnit();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 }

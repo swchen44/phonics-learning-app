@@ -4,9 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f5f1e8">
+  <meta name="pronunciation-endpoint" content="">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="stylesheet" href="./styles.css">
   <title>Phonics 聽音跟讀</title>
+  <script src="./curriculum.js" defer></script>
+  <script src="./pronunciation.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
 <body>
@@ -23,8 +26,11 @@
 
     <section id="lesson" class="panel" aria-labelledby="unitTitle">
       <div class="lesson-heading">
-        <p class="eyebrow" id="unitNumber" lang="en"></p>
-        <h2 id="unitTitle" lang="en"></h2>
+        <div>
+          <p class="eyebrow" id="unitNumber" lang="en"></p>
+          <h2 id="unitTitle" lang="en"></h2>
+        </div>
+        <label class="unit-picker">教材單元 <select id="unitPicker"></select></label>
       </div>
       <nav class="tabs" aria-label="練習與測驗">
         <button data-tab="sound">聽音</button>
@@ -33,17 +39,17 @@
         <button data-tab="quiz">聽力測驗</button>
         <button data-tab="reading">朗讀測驗</button>
       </nav>
+      <details id="pronunciationSetup" hidden>
+        <summary>發音判定設定</summary>
+        <p>啟用後，每題朗讀錄音會傳送至 Microsoft Azure 做發音判定。</p>
+        <label>課堂使用碼 <input id="pronunciationAccess" type="password" autocomplete="off"></label>
+        <label><input id="pronunciationConsent" type="checkbox"> 啟用發音判定</label>
+      </details>
       <div id="stage"></div>
       <p id="feedback" role="status" aria-live="polite"></p>
     </section>
 
-    <div class="details-grid">
-      <section class="panel" aria-labelledby="unitsTitle">
-        <h2 id="unitsTitle">教材單元</h2>
-        <div id="units" class="actions"></div>
-        <p class="muted" id="unitAvailability"></p>
-      </section>
-      <section class="panel" aria-labelledby="studentsTitle">
+    <section class="panel students" aria-labelledby="studentsTitle">
         <h2 id="studentsTitle">學生與本機進度</h2>
         <div class="actions">
           <label class="sr-only" for="student">目前學生</label>
@@ -58,9 +64,8 @@
           <button id="export" class="secondary">匯出 JSON 備份</button>
           <label class="file-label">匯入備份 <input type="file" id="import" accept=".json,application/json"></label>
         </div>
-      </section>
-    </div>
-    <footer>學習進度儲存在這個瀏覽器。錄音只在本頁暫存。</footer>
+    </section>
+    <footer>學習進度儲存在這個瀏覽器。啟用發音判定時，朗讀錄音會傳送至評估服務。</footer>
   </main>
 </body>
 </html>
