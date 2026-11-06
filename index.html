@@ -1,1 +1,66 @@
-<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#2563eb"><link rel="manifest" href="./manifest.webmanifest"><title>Phonics 聽音跟讀</title><style>body{font:16px system-ui;margin:0;background:#f1f5f9;color:#172033}main{max-width:820px;margin:auto;padding:20px}header{background:#1d4ed8;color:white;padding:22px;border-radius:16px}section{background:white;padding:20px;margin-top:16px;border-radius:16px;box-shadow:0 2px 9px #0001}button,input,select{font:inherit;padding:11px;border-radius:9px;border:1px solid #cbd5e1}button{background:#2563eb;color:white;cursor:pointer;margin:4px}button.secondary{background:#e2e8f0;color:#172033}button:disabled{opacity:.45}.tabs{display:flex;flex-wrap:wrap}.tabs button{flex:1}.word{font-size:68px;font-weight:800;text-align:center;color:#1d4ed8}.parts{text-align:center;font-size:26px}.muted{color:#64748b}.choices{display:grid;grid-template-columns:1fr 1fr}.choices button{padding:20px}.meter{background:#e2e8f0;border-radius:9px;height:14px;overflow:hidden}.meter div{height:100%;background:#22c55e;width:0}#feedback{font-weight:700;min-height:28px}.ok{color:#15803d}.bad{color:#b91c1c}audio{max-width:100%}</style></head><body><main><header><h1>🎧 Phonics 聽音跟讀</h1><p>先練聲音 → 拼讀單字 → 錄音跟讀 → 聽力測驗</p></header><section><h2>學生與本機進度</h2><select id="student"></select> <input id="newStudent" placeholder="新學生名稱" maxlength="30"><button id="addStudent">新增學生</button><p id="summary"></p><div class="meter"><div id="progress"></div></div><p><button id="export">匯出 JSON 備份</button><label>匯入備份 <input type="file" id="import" accept=".json,application/json"></label></p></section><section id="lesson"><h2>Short Vowels · Unit 1</h2><div class="tabs"><button data-tab="sound">① 聽音</button><button data-tab="blend">② 拼讀</button><button data-tab="record">③ 跟讀錄音</button><button data-tab="quiz">④ 聽力測驗</button></div><div id="stage"></div><p id="feedback" role="status" aria-live="polite"></p></section><section><h2>教材單元</h2><p>目前開放 Unit 1，其他 31 單元持續製作中。</p><div id="units"></div></section><p class="muted">進度只存在這個裝置的瀏覽器中。錄音不會上傳，請定期備份。</p></main><script src="./app.js" defer></script></body></html>
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f5f1e8">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./styles.css">
+  <title>Phonics 聽音跟讀</title>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <p class="eyebrow" lang="en">THE PHONICS STUDIO</p>
+      <h1><span lang="en">Phonics</span> 聽音跟讀</h1>
+      <p>從一個聲音開始，聽懂、拼讀，再大聲念出來。</p>
+      <svg class="hero-art" viewBox="0 0 120 120" aria-hidden="true">
+        <path d="M60 6c1 34 10 48 52 54-42 5-51 19-52 54-4-35-15-48-52-54C45 54 56 40 60 6Z" fill="none" stroke="currentColor" stroke-width="2"/>
+        <path d="M60 34v52M34 60h52M43 43l34 34m0-34L43 77" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </header>
+
+    <section id="lesson" class="panel" aria-labelledby="unitTitle">
+      <div class="lesson-heading">
+        <p class="eyebrow" id="unitNumber" lang="en"></p>
+        <h2 id="unitTitle" lang="en"></h2>
+      </div>
+      <nav class="tabs" aria-label="練習與測驗">
+        <button data-tab="sound">聽音</button>
+        <button data-tab="blend">拼讀</button>
+        <button data-tab="record">錄音跟讀</button>
+        <button data-tab="quiz">聽力測驗</button>
+        <button data-tab="reading">朗讀測驗</button>
+      </nav>
+      <div id="stage"></div>
+      <p id="feedback" role="status" aria-live="polite"></p>
+    </section>
+
+    <div class="details-grid">
+      <section class="panel" aria-labelledby="unitsTitle">
+        <h2 id="unitsTitle">教材單元</h2>
+        <div id="units" class="actions"></div>
+        <p class="muted" id="unitAvailability"></p>
+      </section>
+      <section class="panel" aria-labelledby="studentsTitle">
+        <h2 id="studentsTitle">學生與本機進度</h2>
+        <div class="actions">
+          <label class="sr-only" for="student">目前學生</label>
+          <select id="student"></select>
+          <label class="sr-only" for="newStudent">新學生名稱</label>
+          <input id="newStudent" placeholder="新學生名稱" maxlength="30">
+          <button id="addStudent" class="secondary">新增學生</button>
+        </div>
+        <p id="summary"></p>
+        <progress id="progress" value="0" max="1" aria-label="已練習單字"></progress>
+        <div class="actions backup">
+          <button id="export" class="secondary">匯出 JSON 備份</button>
+          <label class="file-label">匯入備份 <input type="file" id="import" accept=".json,application/json"></label>
+        </div>
+      </section>
+    </div>
+    <footer>學習進度儲存在這個瀏覽器。錄音只在本頁暫存。</footer>
+  </main>
+</body>
+</html>
