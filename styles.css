@@ -83,6 +83,9 @@ progress { width: 100%; accent-color: var(--good); }
 .exam-mistake { color: #9d382e; }
 .exam-errors select { margin-top: .4rem; }
 .global-settings { margin-bottom: 1rem; }
+.speed-settings { margin: .75rem 0; padding-bottom: .75rem; border-bottom: 1px solid var(--line); }
+.speed-settings label { margin-right: .5rem; }
+.speed-settings p { margin-top: .35rem; }
 .global-settings p { margin: .5rem 0; }
 .global-settings fieldset { display: grid; gap: .35rem; }
 .global-settings input[type=number] { width: 5rem; }

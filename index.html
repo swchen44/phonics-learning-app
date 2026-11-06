@@ -29,6 +29,16 @@
   </nav>
   <dialog id="settingsDialog" aria-labelledby="settingsTitle">
     <div class="dialog-heading"><h2 id="settingsTitle">工具與設定</h2><button id="closeSettings" type="button" class="secondary" aria-label="關閉工具設定">✕</button></div>
+    <section class="speed-settings" aria-labelledby="speedSettingsTitle">
+      <h3 id="speedSettingsTitle">慢速播放</h3>
+      <label for="slowDuration">播放時間</label>
+      <select id="slowDuration">
+        <option value="1.5">原慢速播放時間的 1.5 倍</option>
+        <option value="2">原慢速播放時間的 2 倍</option>
+        <option value="2.5">原慢速播放時間的 2.5 倍</option>
+      </select>
+      <p id="slowDurationStatus" role="status"></p>
+    </section>
     <section class="global-settings" aria-labelledby="hintSettingsTitle">
       <h3 id="hintSettingsTitle">全域提示設定</h3>
       <p>選擇聽力題要顯示的提示按鈕，並設定每題每種提示的使用次數。</p>

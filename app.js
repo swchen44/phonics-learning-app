@@ -7,6 +7,10 @@ const hintTitles = { first: '第一個字母', last: '最後一個字母', vowel
 const hintSettingsKey = 'phonics-hint-settings';
 let hintSettings = Object.fromEntries(Object.keys(hintTitles).map(kind => [kind, { enabled: false, limit: 1 }]));
 const settingsKey = 'phonics-pronunciation-settings';
+const slowDurationKey = 'phonics-slow-duration';
+const normalRate = 0.9;
+const originalSlowRate = 0.6;
+let slowDuration = 2;
 const $ = id => document.getElementById(id);
 const svgNamespace = 'http://www.w3.org/2000/svg';
 let db;
@@ -105,8 +109,8 @@ function pronunciationButtons(word, onPlay) {
     if (!recording && speak(word.w, rate)) onPlay?.();
   }
   return actions(
-    button('🔊 正常速度', () => play(0.9)),
-    button('🔊 慢速播放', () => play(0.6), true),
+    button('🔊 正常速度', () => play(normalRate)),
+    button('🔊 慢速播放', () => play(originalSlowRate / slowDuration), true),
   );
 }
 
@@ -387,6 +391,33 @@ function hintButtons(quiz, word) {
   return row;
 }
 
+function initSlowDuration() {
+  const control = $('slowDuration');
+  const status = $('slowDurationStatus');
+  try {
+    const saved = Number(localStorage.getItem(slowDurationKey));
+    if ([1.5, 2, 2.5].includes(saved)) slowDuration = saved;
+  } catch {
+    status.textContent = '無法讀取慢速播放設定，已使用 2 倍時間。';
+  }
+  control.value = String(slowDuration);
+  control.onchange = () => {
+    const value = Number(control.value);
+    if (![1.5, 2, 2.5].includes(value)) {
+      control.value = String(slowDuration);
+      return;
+    }
+    try {
+      localStorage.setItem(slowDurationKey, String(value));
+      slowDuration = value;
+      status.textContent = '慢速播放設定已儲存。';
+    } catch {
+      control.value = String(slowDuration);
+      status.textContent = '無法儲存慢速播放設定。';
+    }
+  };
+}
+
 function initHintSettings() {
   const root = $('hintSettings');
   const status = $('hintSettingsStatus');
@@ -510,7 +541,7 @@ function drawQuiz(root, quiz = quizzes[tab] ??= unitQuiz(tab), combined = false)
     if (quiz.selected) message(quiz.selected === word ? '答對了！' : `正確答案是 ${word.w}。可以再聽一次。`, quiz.selected === word);
   } else if (mode === 'typing') {
     root.append(element('p', '聽慢速發音，輸入完整單字。'),
-      actions(button('🔊 慢速播放', () => speak(word.w, 0.6), true)));
+      actions(button('🔊 慢速播放', () => speak(word.w, originalSlowRate / slowDuration), true)));
     const input = element('input');
     input.id = 'typingAnswer';
     input.lang = 'en';
@@ -975,6 +1006,7 @@ async function init() {
   db.onversionchange = () => db.close();
   await students();
   initPronunciationSettings();
+  initSlowDuration();
   initHintSettings();
 
   $('student').onchange = event => {
