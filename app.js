@@ -6,16 +6,114 @@ function os(mode='readonly'){return db.transaction('students',mode).objectStore(
 async function all(){return req(os().getAll())}async function current(){return req(os().get(student))}async function save(p){return req(os('readwrite').put(p))}
 function message(s,good=true){$('feedback').textContent=s;$('feedback').className=good?'ok':'bad'}
 function button(s,fn,secondary=false){const b=document.createElement('button');b.textContent=s;if(secondary)b.className='secondary';b.onclick=fn;return b}
-function speak(s,slow=false){if(!('speechSynthesis'in window)){message('裝置不支援語音合成',false);return}speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(s);u.lang='en-US';u.rate=slow?.65:.9;speechSynthesis.speak(u)}
+function speak(text, rate) {
+  if (!('speechSynthesis' in window)) {
+    message('裝置不支援語音合成', false);
+    return;
+  }
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'en-US';
+  utterance.pitch = 1;
+  utterance.rate = rate;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utterance);
+}
+
+function pronunciationButtons(word, onPlay) {
+  function play(rate) {
+    speak(word, rate);
+    onPlay?.();
+  }
+
+  return [
+    button('🔊 正常速度', () => play(0.9)),
+    button('🔊 慢速播放', () => play(0.6), true),
+  ];
+}
 async function log(kind,correct=true,w=words[idx].w){const p=await current();if(!p)return;p.events.push({at:new Date().toISOString(),unit:1,word:w,kind,correct});p.events=p.events.slice(-3000);await save(p);await progress()}
 async function progress(){const p=await current();const ev=p?.events||[];const seen=new Set(ev.filter(x=>['listen','record'].includes(x.kind)).map(x=>x.word));const qs=ev.filter(x=>x.kind==='quiz');$('summary').textContent=(p?.name||'學生')+'：已練習 '+seen.size+'/6 個單字；測驗答對 '+qs.filter(x=>x.correct).length+'/'+qs.length+' 題';$('progress').style.width=(seen.size/6*100)+'%'}
 async function students(){let list=await all();if(!list.length){const p={id:crypto.randomUUID(),name:'學生 1',events:[]};await save(p);list=[p]}$('student').replaceChildren(...list.map(p=>new Option(p.name,p.id)));if(!list.some(p=>p.id===student))student=list[0].id;$('student').value=student;await progress()}
 function nextQuestion(){const answer=words[Math.floor(Math.random()*words.length)].w;const others=words.map(x=>x.w).filter(x=>x!==answer).sort(()=>Math.random()-.5).slice(0,3);question={answer,options:[answer,...others].sort(()=>Math.random()-.5)}}
-function draw(){document.querySelectorAll('[data-tab]').forEach(b=>b.style.opacity=b.dataset.tab===tab?'1':'.7');const root=$('stage');root.replaceChildren();message('');const w=words[idx];const h=document.createElement('h3'),p=document.createElement('p');
-if(tab==='sound'){h.textContent='① 聽短母音 /æ/';p.textContent='先聽單字中的短母音，注意張嘴發出短促的 /æ/。瀏覽器語音合成不適合獨立音素評分。';root.append(h,p,button('🔊 慢速 cat',()=>{speak('cat',true);log('listen',true,'cat')}),button('🔊 慢速 bat',()=>{speak('bat',true);log('listen',true,'bat')},true))}
-if(tab==='blend'){h.textContent='② 逐音拼讀';const big=document.createElement('div');big.className='word';big.textContent=w.w;const parts=document.createElement('div');parts.className='parts';parts.textContent=w.p.join(' + ');p.textContent=w.zh;root.append(h,big,parts,p,button('🔊 慢速',()=>{speak(w.w,true);log('listen')}),button('🔊 正常速度',()=>{speak(w.w);log('listen')},true),button('下一個 →',()=>{idx=(idx+1)%words.length;draw()},true))}
-if(tab==='record'){h.textContent='③ 聽音後跟讀';const big=document.createElement('div');big.className='word';big.textContent=w.w;p.textContent=w.zh+' · '+w.p.join(' ');const audio=document.createElement('audio');audio.controls=true;audio.hidden=true;if(recorded?.word===w.w){audio.src=recorded.url;audio.hidden=false}root.append(h,big,p,button('🔊 聽標準音',()=>speak(w.w)),button('🎙 開始錄音',startRecord),button('⏹ 停止錄音',stopRecord,true),audio,button('下一個 →',()=>{idx=(idx+1)%words.length;draw()},true));const note=document.createElement('p');note.className='muted';note.textContent='錄音只在本頁暫存，供重聽比較；尚無自動發音評分。';root.append(note)}
-if(tab==='quiz'){if(!question)nextQuestion();h.textContent='④ 聽音選字';p.textContent='聽到哪個單字？';root.append(h,p,button('🔊 播放題目',()=>speak(question.answer)));const grid=document.createElement('div');grid.className='choices';question.options.forEach(option=>grid.append(button(option,async()=>{const correct=option===question.answer;await log('quiz',correct,question.answer);message(correct?'答對了！':'再聽一次，正確答案：'+question.answer,correct);grid.querySelectorAll('button').forEach(b=>b.disabled=true)},true)));root.append(grid,button('下一題 →',()=>{nextQuestion();draw()}))}}
+function draw() {
+  document.querySelectorAll('[data-tab]').forEach(b => b.style.opacity = b.dataset.tab === tab ? '1' : '.7');
+  const root = $('stage');
+  root.replaceChildren();
+  message('');
+  const w = words[idx];
+  const h = document.createElement('h3');
+  const p = document.createElement('p');
+
+  if (tab === 'sound') {
+    h.textContent = '① 聽短母音 /æ/';
+    p.textContent = '先聽單字中的短母音，注意張嘴發出短促的 /æ/。瀏覽器語音合成不適合獨立音素評分。';
+    root.append(h, p);
+    for (const word of ['cat', 'bat']) {
+      const group = document.createElement('fieldset');
+      const label = document.createElement('legend');
+      label.textContent = word;
+      group.append(label, ...pronunciationButtons(word, () => log('listen', true, word)));
+      root.append(group);
+    }
+  }
+
+  if (tab === 'blend') {
+    h.textContent = '② 逐音拼讀';
+    const big = document.createElement('div');
+    big.className = 'word';
+    big.textContent = w.w;
+    const parts = document.createElement('div');
+    parts.className = 'parts';
+    parts.textContent = w.p.join(' + ');
+    p.textContent = w.zh;
+    root.append(h, big, parts, p,
+      ...pronunciationButtons(w.w, () => log('listen', true, w.w)),
+      button('下一個 →', () => { idx = (idx + 1) % words.length; draw(); }, true));
+  }
+
+  if (tab === 'record') {
+    h.textContent = '③ 聽音後跟讀';
+    const big = document.createElement('div');
+    big.className = 'word';
+    big.textContent = w.w;
+    p.textContent = w.zh + ' · ' + w.p.join(' ');
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.hidden = true;
+    if (recorded?.word === w.w) {
+      audio.src = recorded.url;
+      audio.hidden = false;
+    }
+    root.append(h, big, p,
+      ...pronunciationButtons(w.w),
+      button('🎙 開始錄音', startRecord),
+      button('⏹ 停止錄音', stopRecord, true),
+      audio,
+      button('下一個 →', () => { idx = (idx + 1) % words.length; draw(); }, true));
+    const note = document.createElement('p');
+    note.className = 'muted';
+    note.textContent = '錄音只在本頁暫存，供重聽比較；尚無自動發音評分。';
+    root.append(note);
+  }
+
+  if (tab === 'quiz') {
+    if (!question) nextQuestion();
+    const { answer, options } = question;
+    h.textContent = '④ 聽音選字';
+    p.textContent = '聽到哪個單字？';
+    root.append(h, p, ...pronunciationButtons(answer));
+    const grid = document.createElement('div');
+    grid.className = 'choices';
+    for (const option of options) {
+      grid.append(button(option, async () => {
+        const correct = option === answer;
+        await log('quiz', correct, answer);
+        message(correct ? '答對了！' : '再聽一次，正確答案：' + answer, correct);
+        grid.querySelectorAll('button').forEach(b => b.disabled = true);
+      }, true));
+    }
+    root.append(grid, button('下一題 →', () => { nextQuestion(); draw(); }));
+  }
+}
 async function startRecord(){if(recorder?.state==='recording')return;if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){message('此瀏覽器不支援麥克風錄音',false);return}try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks=[];recorder=new MediaRecorder(stream);const word=words[idx].w;recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};recorder.onstop=async()=>{const blob=new Blob(chunks,{type:recorder.mimeType||'audio/webm'});if(recorded?.url)URL.revokeObjectURL(recorded.url);recorded={word,url:URL.createObjectURL(blob)};stream.getTracks().forEach(t=>t.stop());await log('record',true,word);draw();message('錄音完成！按播放鍵重聽自己的發音')};recorder.start();message('錄音中…')}catch(e){message('麥克風無法使用：'+e.message,false)}}
 function stopRecord(){if(recorder?.state==='recording')recorder.stop()}
 async function backup(){const data={schema:1,exportedAt:new Date().toISOString(),profiles:await all()};const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='phonics-progress.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
