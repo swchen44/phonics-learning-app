@@ -53,9 +53,17 @@
     </section>
     <section class="data-management" aria-labelledby="dataManagementTitle">
       <h3 id="dataManagementTitle">儲存空間與資料清除</h3>
-      <p>每位學生的資料內容與錄音大小估算，不含瀏覽器索引及共用快取。</p>
+      <p>資料內容與錄音大小估算，不含瀏覽器索引及共用快取。</p>
+      <label>查看使用者 <select id="usageStudent"></select></label>
       <button id="refreshUsage" type="button" class="secondary">更新空間使用量</button>
       <div id="storageUsage" aria-live="polite"></div>
+      <fieldset id="clearKinds"><legend>選擇清除種類</legend>
+        <label><input type="checkbox" value="all" checked> 全部種類</label>
+        <label><input type="checkbox" value="audio" checked> 錄音</label>
+        <label><input type="checkbox" value="tests" checked> 測驗紀錄</label>
+        <label><input type="checkbox" value="mistakes" checked> 錯字統計</label>
+        <label><input type="checkbox" value="practice" checked> 練習進度</label>
+      </fieldset>
       <div class="actions">
         <label>使用者 <select id="clearStudent"></select></label>
         <label>時間 <select id="clearAge">
@@ -67,7 +75,7 @@
         </select></label>
         <button id="clearData" type="button" class="secondary">清除資料</button>
       </div>
-      <p>清除所選學生的錄音、測驗、錯字和練習紀錄；學生名稱會保留。選「3 天前」會保留最近 3 天的資料。</p>
+      <p>選「3 天前」會保留最近 3 天的資料。只清除錯字統計時，試卷和分數會保留。只清除測驗紀錄時，錄音會保留在綜合測驗的「保留的錄音」。</p>
       <p id="dataManagementStatus" role="status" aria-live="polite"></p>
     </section>
     <p id="settingsFeedback" role="status" aria-live="polite"></p>

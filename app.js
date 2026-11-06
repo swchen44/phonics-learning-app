@@ -635,10 +635,20 @@ function examRecording(owner, examId, question) {
     remove.disabled = true;
     try {
       await new Promise((resolve, reject) => {
-        const transaction = db.transaction('examAudio', 'readwrite');
+        const transaction = db.transaction(['students', 'examAudio'], 'readwrite');
         transaction.oncomplete = resolve;
         transaction.onabort = reject;
         transaction.objectStore('examAudio').delete(key);
+        const profiles = transaction.objectStore('students');
+        const request = profiles.get(owner);
+        request.onsuccess = () => {
+          const profile = request.result;
+          if (!profile?.audioArchives?.some(archive => archive.id === examId)) return;
+          profile.audioArchives = profile.audioArchives.map(archive => archive.id === examId ? {
+            ...archive, items: archive.items.filter(item => item.question !== question),
+          } : archive).filter(archive => archive.items.length);
+          profiles.put(profile);
+        };
       });
       releaseRecording(audioUrl);
       reviewAudioUrls.delete(audioUrl);
@@ -678,6 +688,7 @@ function manualGrade(owner, result, index, answer) {
             target.transaction.abort();
             return;
           }
+          if (question.correct !== correct) delete question.mistakeCleared;
           question.correct = correct;
           question.source = correct === null ? null : 'manual';
           target.put(profile);
@@ -784,6 +795,18 @@ async function showExamHistory(root, activeStudent) {
       detail.append(element('summary', `${new Date(result.at).toLocaleString('zh-TW')} · ${examScore(result.answers)}`), examReview(result, activeStudent));
       root.append(detail);
     }
+    for (const archive of [...(profile?.audioArchives ?? [])].reverse()) {
+      const detail = element('details', '', 'exam-history');
+      detail.append(element('summary', `${new Date(archive.at).toLocaleString('zh-TW')} · 保留的錄音`));
+      const list = element('ol');
+      for (const item of archive.items) {
+        const row = element('li');
+        row.append(element('p', `Unit ${item.unit} · ${item.word}`), examRecording(activeStudent, archive.id, item.question));
+        list.append(row);
+      }
+      detail.append(list);
+      root.append(detail);
+    }
   } catch {
     if (root.isConnected) root.append(element('p', '無法讀取測驗紀錄。'));
   }
@@ -836,15 +859,15 @@ async function scanMistakes(root, activeStudent, period) {
     const profile = await req(store().get(activeStudent));
     if (!root.isConnected || student !== activeStudent || tab !== 'mistakes' || $('mistakePeriod')?.value !== period) return;
     const counts = { listening: new Map(), reading: new Map() };
-    function count(kind, word, correct, at) {
-      if (correct !== false || typeof word !== 'string') return;
+    function count(kind, word, correct, at, cleared) {
+      if (correct !== false || cleared || typeof word !== 'string') return;
       if (cutoff !== null && !(Date.parse(at) >= cutoff && Date.parse(at) <= now)) return;
       const category = kind === 'reading' ? counts.reading : ['quiz', 'typing'].includes(kind) ? counts.listening : null;
       if (category) category.set(word, (category.get(word) ?? 0) + 1);
     }
-    for (const event of profile?.events ?? []) count(event.kind, event.word, event.correct, event.at);
+    for (const event of profile?.events ?? []) count(event.kind, event.word, event.correct, event.at, event.mistakeCleared);
     for (const result of profile?.exams ?? []) {
-      for (const answer of result.answers ?? []) count(answer.kind, answer.word, answer.correct, result.at);
+      for (const answer of result.answers ?? []) count(answer.kind, answer.word, answer.correct, result.at, answer.mistakeCleared);
     }
     root.replaceChildren();
     for (const [category, title] of [['listening', '聽力'], ['reading', '朗讀']]) {
@@ -897,17 +920,38 @@ async function refreshUsage() {
   const status = $('dataManagementStatus');
   try {
     const { profiles, recordings } = await storedStudentData();
-    const bytes = new Map(profiles.map(profile => [profile.id, new TextEncoder().encode(JSON.stringify(profile)).byteLength]));
+    const size = value => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+    const bytes = new Map(profiles.map(profile => {
+      const practice = (profile.events ?? []).filter(event => ['listen', 'record'].includes(event.kind)).reduce((sum, event) => sum + size(event), 0);
+      const tests = (profile.events ?? []).filter(event => !['listen', 'record'].includes(event.kind)).reduce((sum, event) => sum + size(event), 0) + (profile.exams ?? []).reduce((sum, result) => sum + size(result), 0);
+      const mistakes = (profile.events ?? []).filter(event => event.correct === false && !event.mistakeCleared).reduce((sum, event) => sum + size(event), 0) + (profile.exams ?? []).reduce((sum, result) => sum + (result.answers ?? []).filter(answer => answer.correct === false && !answer.mistakeCleared).reduce((n, answer) => n + size(answer), 0), 0);
+      const audio = (profile.audioArchives ?? []).reduce((sum, archive) => sum + size(archive), 0);
+      const other = Math.max(0, size(profile) - practice - tests - audio);
+      return [profile.id, { practice, tests, mistakes, other, audio }];
+    }));
     for (const recording of recordings) {
-      if (bytes.has(recording.student)) bytes.set(recording.student, bytes.get(recording.student) + (recording.clip?.size ?? 0));
+      if (bytes.has(recording.student)) bytes.get(recording.student).audio += recording.clip?.size ?? 0;
     }
-    const list = element('ul');
-    for (const profile of profiles) list.append(element('li', `${profile.name} · 約 ${formatBytes(bytes.get(profile.id))}`));
-    $('storageUsage').replaceChildren(list);
-    const picker = $('clearStudent');
-    const selected = picker.value;
-    picker.replaceChildren(new Option('全部使用者', '__all__'), ...profiles.map(profile => new Option(profile.name, profile.id)));
-    picker.value = [...picker.options].some(option => option.value === selected) ? selected : student;
+    for (const id of ['clearStudent', 'usageStudent']) {
+      const picker = $(id);
+      const selected = picker.value;
+      picker.replaceChildren(new Option('全部使用者', '__all__'), ...profiles.map(profile => new Option(profile.name, profile.id)));
+      picker.value = [...picker.options].some(option => option.value === selected) ? selected : student;
+    }
+    function display() {
+      const selected = $('usageStudent').value;
+      const targets = profiles.filter(profile => selected === '__all__' || profile.id === selected);
+      const totals = { practice: 0, tests: 0, mistakes: 0, other: 0, audio: 0 };
+      for (const profile of targets) for (const key of Object.keys(totals)) totals[key] += bytes.get(profile.id)[key];
+      const list = element('ul');
+      for (const [key, title] of [['practice', '練習進度'], ['tests', '測驗紀錄'], ['mistakes', '錯字統計（包含在測驗紀錄中）'], ['audio', '錄音'], ['other', '學生資料及其他']]) {
+        list.append(element('li', `${title} · 約 ${formatBytes(totals[key])}`));
+      }
+      const total = totals.practice + totals.tests + totals.audio + totals.other;
+      $('storageUsage').replaceChildren(element('p', `總計約 ${formatBytes(total)}`), list);
+    }
+    $('usageStudent').onchange = display;
+    display();
     status.textContent = '';
   } catch {
     status.textContent = '無法讀取空間使用量，請再試一次。';
@@ -920,26 +964,53 @@ function oldEnough(at, cutoff) {
   return Number.isFinite(timestamp) && timestamp < cutoff;
 }
 
-function deletionPlan(profiles, recordings, selected, cutoff) {
+function deletionPlan(profiles, recordings, selected, cutoff, kinds) {
   const targets = profiles.filter(profile => selected === '__all__' || profile.id === selected);
   const ids = new Set(targets.map(profile => profile.id));
-  const exams = new Map(targets.map(profile => [profile.id, new Set((profile.exams ?? []).filter(result => oldEnough(result.at, cutoff)).map(result => result.id))]));
+  const datedExams = new Map(targets.map(profile => [profile.id, new Set([...(profile.exams ?? []), ...(profile.audioArchives ?? [])].filter(result => oldEnough(result.at, cutoff)).map(result => result.id))]));
+  const exams = new Map(targets.map(profile => [profile.id, new Set(kinds.has('tests') ? (profile.exams ?? []).filter(result => oldEnough(result.at, cutoff)).map(result => result.id) : [])]));
   const eventCounts = new Map();
+  const mistakeEvents = new Map();
+  const mistakeAnswers = new Map();
   let events = 0;
+  let mistakeCount = 0;
   for (const profile of targets) {
     const entries = new Map();
+    const marks = new Map();
+    const answers = new Map();
     for (const event of profile.events ?? []) {
       if (!oldEnough(event.at, cutoff)) continue;
       const key = JSON.stringify(event);
-      entries.set(key, (entries.get(key) ?? 0) + 1);
-      events++;
+      const practice = ['listen', 'record'].includes(event.kind);
+      if ((practice && kinds.has('practice')) || (!practice && kinds.has('tests'))) {
+        entries.set(key, (entries.get(key) ?? 0) + 1);
+        events++;
+      } else if (kinds.has('mistakes') && event.correct === false && !event.mistakeCleared) {
+        marks.set(key, (marks.get(key) ?? 0) + 1);
+        mistakeCount++;
+      }
+    }
+    if (kinds.has('mistakes') && !kinds.has('tests')) {
+      for (const result of profile.exams ?? []) {
+        if (!oldEnough(result.at, cutoff)) continue;
+        const entries = new Map();
+        for (const [index, answer] of (result.answers ?? []).entries()) {
+          if (answer.correct === false && !answer.mistakeCleared) {
+            entries.set(index, JSON.stringify(answer));
+            mistakeCount++;
+          }
+        }
+        answers.set(result.id, entries);
+      }
     }
     eventCounts.set(profile.id, entries);
+    mistakeEvents.set(profile.id, marks);
+    mistakeAnswers.set(profile.id, answers);
   }
   const examCount = [...exams.values()].reduce((total, items) => total + items.size, 0);
-  const audioKeys = new Set(recordings.filter(clip => ids.has(clip.student) && (cutoff === null || exams.get(clip.student).has(clip.exam)))
+  const audioKeys = new Set(recordings.filter(clip => kinds.has('audio') && ids.has(clip.student) && (cutoff === null || datedExams.get(clip.student).has(clip.exam)))
     .map(clip => JSON.stringify([clip.student, clip.exam, clip.question])));
-  return { ids, exams, eventCounts, audioKeys, events, examCount, audioCount: audioKeys.size };
+  return { ids, exams, eventCounts, mistakeEvents, mistakeAnswers, audioKeys, events, examCount, mistakeCount, audioCount: audioKeys.size };
 }
 
 async function clearStudentData() {
@@ -947,7 +1018,12 @@ async function clearStudentData() {
   const button = $('clearData');
   const selected = $('clearStudent').value;
   const age = $('clearAge').value;
+  const kinds = new Set([...$('clearKinds').querySelectorAll('input:checked')].map(input => input.value).filter(value => value !== 'all'));
   if (!selected || !['all', '1', '3', '7', '30'].includes(age)) return;
+  if (!kinds.size) {
+    status.textContent = '請至少選擇一種資料。';
+    return;
+  }
   if (recording || exam?.saving || exam?.assessmentRequest) {
     status.textContent = '請先完成錄音、發音判定或測驗儲存。';
     return;
@@ -956,12 +1032,13 @@ async function clearStudentData() {
   try {
     const cutoff = age === 'all' ? null : Date.now() - Number(age) * 86400000;
     const { profiles, recordings } = await storedStudentData();
-    const plan = deletionPlan(profiles, recordings, selected, cutoff);
+    const plan = deletionPlan(profiles, recordings, selected, cutoff, kinds);
     if (!plan.ids.size) throw Error('找不到所選使用者。');
     const label = selected === '__all__' ? '全部使用者' : profiles.find(profile => profile.id === selected).name;
     const time = cutoff === null ? '全部時間' : `早於 ${new Date(cutoff).toLocaleString('zh-TW')} 的資料`;
-    const reset = plan.ids.has(student) ? '\n目前學生正在進行的練習和未交卷測驗也會重置。' : '';
-    if (!confirm(`確定清除 ${label}，${time}？\n預計刪除 ${plan.events} 筆單元練習及測驗紀錄、${plan.examCount} 份綜合測驗與 ${plan.audioCount} 段錄音。學生名稱保留。${reset}`)) return;
+    const names = { audio: '錄音', tests: '測驗紀錄', mistakes: '錯字統計', practice: '練習進度' };
+    const reset = plan.ids.has(student) && kinds.has('tests') && exam?.saved && plan.exams.get(student).has(exam.result.id) ? '\n目前開啟的測驗結果會關閉。' : '';
+    if (!confirm(`確定清除 ${label}，${time}？\n種類：${[...kinds].map(kind => names[kind]).join('、')}。\n預計刪除 ${plan.events} 筆單元紀錄、${plan.examCount} 份綜合測驗及 ${plan.audioCount} 段錄音，清除 ${plan.mistakeCount} 筆錯字統計。學生名稱保留。${reset}`)) return;
     await new Promise((resolve, reject) => {
       const transaction = db.transaction(['students', 'examAudio'], 'readwrite');
       const users = transaction.objectStore('students');
@@ -971,13 +1048,36 @@ async function clearStudentData() {
         for (const profile of request.result) {
           if (!plan.ids.has(profile.id)) continue;
           const remaining = new Map(plan.eventCounts.get(profile.id));
-          profile.events = (profile.events ?? []).filter(event => {
+          const marks = new Map(plan.mistakeEvents.get(profile.id));
+          profile.events = (profile.events ?? []).flatMap(event => {
             const key = JSON.stringify(event);
             const count = remaining.get(key) ?? 0;
-            if (!count) return true;
-            remaining.set(key, count - 1);
-            return false;
+            if (count) {
+              remaining.set(key, count - 1);
+              return [];
+            }
+            const pending = marks.get(key) ?? 0;
+            if (pending) {
+              marks.set(key, pending - 1);
+              return [{ ...event, mistakeCleared: true }];
+            }
+            return [event];
           });
+          for (const result of profile.exams ?? []) {
+            const marks = plan.mistakeAnswers.get(profile.id).get(result.id);
+            if (marks) for (const [index, original] of marks) {
+              if (JSON.stringify(result.answers[index]) === original) result.answers[index] = { ...result.answers[index], mistakeCleared: true };
+            }
+          }
+          const archives = [...(profile.audioArchives ?? [])];
+          for (const result of profile.exams ?? []) {
+            if (!plan.exams.get(profile.id).has(result.id)) continue;
+            const items = recordings.filter(clip => clip.student === profile.id && clip.exam === result.id && !plan.audioKeys.has(JSON.stringify([clip.student, clip.exam, clip.question])))
+              .map(clip => ({ question: clip.question, unit: result.answers?.[clip.question]?.unit, word: result.answers?.[clip.question]?.word }))
+              .filter(item => Number.isInteger(item.unit) && typeof item.word === 'string');
+            if (items.length) archives.push({ id: result.id, at: result.at, items });
+          }
+          profile.audioArchives = archives.map(archive => ({ ...archive, items: archive.items.filter(item => !plan.audioKeys.has(JSON.stringify([profile.id, archive.id, item.question]))) })).filter(archive => archive.items.length);
           profile.exams = (profile.exams ?? []).filter(result => !plan.exams.get(profile.id).has(result.id));
           users.put(profile);
         }
@@ -993,7 +1093,7 @@ async function clearStudentData() {
       transaction.onabort = () => reject(transaction.error || Error('資料清除失敗。'));
     });
     if (plan.ids.has(student)) {
-      resetStudentActivities();
+      if (exam?.saved && plan.exams.get(student).has(exam.result.id)) resetStudentActivities();
       draw();
       await progress();
     }
@@ -1047,10 +1147,19 @@ function restoredExams(exams) {
     result.answers.every(answer => answer && Number.isInteger(answer.unit) && Object.hasOwn(quizTitles, answer.kind) &&
       typeof answer.word === 'string' && (answer.kind === 'reading' || typeof answer.answer === 'string') &&
       [true, false, null].includes(answer.correct) && Array.isArray(answer.sounds) && answer.sounds.every(sound => typeof sound === 'string')))
-    .map(({ id, at, answers }) => ({ id, at, answers: answers.map(({ unit, kind, word, answer, correct, sounds, source }) => ({
+    .map(({ id, at, answers }) => ({ id, at, answers: answers.map(({ unit, kind, word, answer, correct, sounds, source, mistakeCleared }) => ({
       unit, kind, word, answer: kind === 'reading' ? null : answer, correct, sounds,
       source: kind === 'reading' && correct !== null && ['manual', 'server'].includes(source) ? source : null,
+      ...(mistakeCleared === true ? { mistakeCleared: true } : {}),
     })) }));
+}
+
+function restoredAudioArchives(archives) {
+  if (!Array.isArray(archives)) return [];
+  return archives.filter(archive => archive && typeof archive.id === 'string' && typeof archive.at === 'string' &&
+    !Number.isNaN(Date.parse(archive.at)) && Array.isArray(archive.items) && archive.items.every(item => item &&
+      Number.isInteger(item.question) && item.question >= 0 && Number.isInteger(item.unit) && typeof item.word === 'string'))
+    .map(({ id, at, items }) => ({ id, at, items: items.map(({ question, unit, word }) => ({ question, unit, word })) }));
 }
 
 async function restore(file) {
@@ -1063,7 +1172,7 @@ async function restore(file) {
         throw Error('學生資料格式錯誤');
       }
       const events = profile.events.filter(event => event && typeof event.kind === 'string' && typeof event.word === 'string').slice(-3000);
-      return { id: profile.id, name: profile.name.slice(0, 30), events, exams: restoredExams(profile.exams) };
+      return { id: profile.id, name: profile.name.slice(0, 30), events, exams: restoredExams(profile.exams), audioArchives: restoredAudioArchives(profile.audioArchives) };
     });
     if (!mayNavigate() || !confirm('匯入會覆蓋相同學生 ID 的進度，確定嗎？')) return;
     const target = store('readwrite');
@@ -1071,7 +1180,9 @@ async function restore(file) {
       const previous = await req(target.get(profile.id));
       const exams = new Map(profile.exams.map(result => [result.id, result]));
       for (const result of previous?.exams ?? []) exams.set(result.id, result);
-      await req(target.put({ ...profile, exams: [...exams.values()].sort((a, b) => a.at.localeCompare(b.at)) }));
+      const archives = new Map(profile.audioArchives.map(archive => [archive.id, archive]));
+      for (const archive of previous?.audioArchives ?? []) archives.set(archive.id, archive);
+      await req(target.put({ ...profile, exams: [...exams.values()].sort((a, b) => a.at.localeCompare(b.at)), audioArchives: [...archives.values()] }));
     }));
     await students();
     message('備份匯入完成。');
@@ -1210,6 +1321,14 @@ async function init() {
   };
   $('refreshUsage').onclick = refreshUsage;
   $('clearData').onclick = clearStudentData;
+  const kindInputs = [...$('clearKinds').querySelectorAll('input')];
+  const allKinds = kindInputs.find(input => input.value === 'all');
+  allKinds.onchange = () => {
+    for (const input of kindInputs) input.checked = allKinds.checked;
+  };
+  for (const input of kindInputs.filter(input => input !== allKinds)) {
+    input.onchange = () => { allKinds.checked = kindInputs.filter(item => item !== allKinds).every(item => item.checked); };
+  }
   $('closeSettings').onclick = () => $('settingsDialog').close();
   $('settingsDialog').onclose = () => $('menuToggle').focus();
   $('studentsToggle').onclick = () => {

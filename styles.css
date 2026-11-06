@@ -109,6 +109,9 @@ progress { width: 100%; accent-color: var(--good); }
 .data-management { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
 .data-management p, .data-management .actions { margin-top: .5rem; }
 .data-management label { display: grid; gap: .2rem; }
+#clearKinds { margin-top: .75rem; }
+#clearKinds label { display: inline-flex; align-items: center; gap: .3rem; margin-right: .8rem; }
+#clearKinds input { width: auto; min-height: auto; }
 #storageUsage ul { padding-left: 1.4rem; }
 #settingsFeedback.bad { color: #9d382e; }
 #settingsFeedback.ok { color: var(--good); }
